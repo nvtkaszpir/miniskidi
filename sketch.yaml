@@ -17,6 +17,7 @@ profiles:
           https://espressif.github.io/arduino-esp32/package_esp32_index.json
     libraries:
       - ESP32Servo (3.2.1)
+      - RemoteXY (4.1.10)
 
 default_profile: miniskidi
 default_fqbn: esp32:esp32:esp32:DebugLevel=debug

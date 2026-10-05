@@ -11,6 +11,7 @@
 
 #include <ESP32Servo.h> // by Kevin Harrington
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -22,6 +23,8 @@
 #include <esp_log.h>
 #include <esp_https_server.h> // ESP-IDF HTTP(S) server with WebSocket support
 #include <lwip/sockets.h>
+
+#include <RemoteXY.h> // by RemoteXY; after WiFi.h, which enables its WiFi classes
 
 // Used by Certificate.ino
 #include <mbedtls/base64.h> // Basic authentication header
@@ -104,6 +107,11 @@ const unsigned long staConnectTimeoutMs = 15000;
 const char* webUser = "mini";
 const char* webPassword = "skidi";
 
+// RemoteXY phone app (RemoteXYControl.ino): TCP port and password the app asks for. The app
+// connection is not encrypted, so this password can be read by anyone on the same Wi-Fi.
+const uint16_t remoteXYPort = 6377;
+const char* remoteXYPassword = "skidi"; // empty = no password
+
 // global variables
 
 String macSuffix;      // last 3 bytes of the factory MAC address, e.g. "A1B2C3"
@@ -142,8 +150,12 @@ const int maxWebSocketClients = 4;
 int webSocketFds[maxWebSocketClients] = {-1, -1, -1, -1}; // sockets of connected /CarInput clients
 
 
+// Motor commands come from the web server task and from loop() (RemoteXY)
+std::mutex motorMutex;
+
 void rotateMotor(int motorNumber, int motorDirection)
 {
+  std::lock_guard<std::mutex> lock(motorMutex);
   if (motorDirection == FORWARD)
   {
     digitalWrite(motorPins[motorNumber].pinIN1, HIGH);
@@ -174,100 +186,70 @@ void rotateMotor(int motorNumber, int motorDirection)
   }
 }
 
+// Runs a MoveCar command as is, without the horizontalScreen rotation of the web page
+void driveCar(int inputValue)
+{
+  switch (inputValue)
+  {
+
+    case UP:
+      rotateMotor(RIGHT_MOTOR, FORWARD);
+      rotateMotor(LEFT_MOTOR, FORWARD);
+      break;
+
+    case DOWN:
+      rotateMotor(RIGHT_MOTOR, BACKWARD);
+      rotateMotor(LEFT_MOTOR, BACKWARD);
+      break;
+
+    case LEFT:
+      rotateMotor(RIGHT_MOTOR, BACKWARD);
+      rotateMotor(LEFT_MOTOR, FORWARD);
+      break;
+
+    case RIGHT:
+      rotateMotor(RIGHT_MOTOR, FORWARD);
+      rotateMotor(LEFT_MOTOR, BACKWARD);
+      break;
+
+    case STOP:
+      rotateMotor(ARM_MOTOR, STOP);
+      rotateMotor(RIGHT_MOTOR, STOP);
+      rotateMotor(LEFT_MOTOR, STOP);
+      break;
+
+    case ARMUP:
+      rotateMotor(ARM_MOTOR, FORWARD);
+      break;
+
+    case ARMDOWN:
+      rotateMotor(ARM_MOTOR, BACKWARD);
+      removeArmMomentum = true;
+      break;
+
+    default:
+      rotateMotor(ARM_MOTOR, STOP);
+      rotateMotor(RIGHT_MOTOR, STOP);
+      rotateMotor(LEFT_MOTOR, STOP);
+      break;
+  }
+}
+
 void moveCar(int inputValue)
 {
   LOGD("Got value as %d", inputValue);
-  if (!(horizontalScreen))
+  if (horizontalScreen)
   {
+    // The page is used sideways: the screen's up is the machine's left, and so on
     switch (inputValue)
     {
-
-      case UP:
-        rotateMotor(RIGHT_MOTOR, FORWARD);
-        rotateMotor(LEFT_MOTOR, FORWARD);
-        break;
-
-      case DOWN:
-        rotateMotor(RIGHT_MOTOR, BACKWARD);
-        rotateMotor(LEFT_MOTOR, BACKWARD);
-        break;
-
-      case LEFT:
-        rotateMotor(RIGHT_MOTOR, BACKWARD);
-        rotateMotor(LEFT_MOTOR, FORWARD);
-        break;
-
-      case RIGHT:
-        rotateMotor(RIGHT_MOTOR, FORWARD);
-        rotateMotor(LEFT_MOTOR, BACKWARD);
-        break;
-
-      case STOP:
-        rotateMotor(ARM_MOTOR, STOP);
-        rotateMotor(RIGHT_MOTOR, STOP);
-        rotateMotor(LEFT_MOTOR, STOP);
-        break;
-
-      case ARMUP:
-        rotateMotor(ARM_MOTOR, FORWARD);
-        break;
-
-      case ARMDOWN:
-        rotateMotor(ARM_MOTOR, BACKWARD);
-        removeArmMomentum = true;
-        break;
-
-      default:
-        rotateMotor(ARM_MOTOR, STOP);
-        rotateMotor(RIGHT_MOTOR, STOP);
-        rotateMotor(LEFT_MOTOR, STOP);
-        break;
-    }
-  } else {
-    switch (inputValue)
-    {
-      case UP:
-        rotateMotor(RIGHT_MOTOR, BACKWARD);
-        rotateMotor(LEFT_MOTOR, FORWARD);
-        break;
-
-      case DOWN:
-        rotateMotor(RIGHT_MOTOR, FORWARD);
-        rotateMotor(LEFT_MOTOR, BACKWARD);
-        break;
-
-      case LEFT:
-        rotateMotor(RIGHT_MOTOR, BACKWARD);
-        rotateMotor(LEFT_MOTOR, BACKWARD);
-        break;
-
-      case RIGHT:
-        rotateMotor(RIGHT_MOTOR, FORWARD);
-        rotateMotor(LEFT_MOTOR, FORWARD);
-        break;
-
-      case STOP:
-        rotateMotor(ARM_MOTOR, STOP);
-        rotateMotor(RIGHT_MOTOR, STOP);
-        rotateMotor(LEFT_MOTOR, STOP);
-        break;
-
-      case ARMUP:
-        rotateMotor(ARM_MOTOR, FORWARD);
-        break;
-
-      case ARMDOWN:
-        rotateMotor(ARM_MOTOR, BACKWARD);
-        removeArmMomentum = true;
-        break;
-
-      default:
-        rotateMotor(ARM_MOTOR, STOP);
-        rotateMotor(RIGHT_MOTOR, STOP);
-        rotateMotor(LEFT_MOTOR, STOP);
-        break;
+      case UP: inputValue = LEFT; break;
+      case DOWN: inputValue = RIGHT; break;
+      case LEFT: inputValue = DOWN; break;
+      case RIGHT: inputValue = UP; break;
     }
   }
+  driveCar(inputValue);
 }
 
 void bucketTilt(int bucketServoValue)
@@ -278,22 +260,16 @@ void auxControl(int auxServoValue)
 {
   auxServo.write(auxServoValue);
 }
+void setLight(bool on)
+{
+  digitalWrite(lightPin1, on ? HIGH : LOW);
+  digitalWrite(lightPin2, LOW);
+  light = on;
+  LOGI("Lights %s", on ? "on" : "off");
+}
 void lightControl()
 {
-  if (!light)
-  {
-    digitalWrite(lightPin1, HIGH);
-    digitalWrite(lightPin2, LOW);
-    light = true;
-    LOGI("Lights on");
-  }
-  else
-  {
-    digitalWrite(lightPin1, LOW);
-    digitalWrite(lightPin2, LOW);
-    light = false;
-    LOGI("Lights off");
-  }
+  setLight(!light);
 }
 
 // Client IP of a request. The server listens on IPv6 and IPv4, so IPv4 clients show up as
@@ -773,6 +749,9 @@ void setup(void)
 
   // After Wi-Fi: the certificate includes the client-mode IP. If generating a new one fails,
   // a previously stored certificate is still used.
+  // Independent of the web servers, so it also works without a TLS certificate
+  remoteXYSetup();
+
   if (!ensureCertificate() && tlsCertificatePem.length() == 0)
   {
     LOGE("No TLS certificate, web server not started");
@@ -787,6 +766,7 @@ void loop()
   {
     captiveDnsLoop();
   }
+  remoteXYLoop();
 
   static unsigned long lastWebSocketCheck = 0;
   if (httpsServer != NULL && millis() - lastWebSocketCheck >= 200)
@@ -813,7 +793,8 @@ void loop()
   // lets everything else run.
   // Why 2 ms: delay() sleeps in whole FreeRTOS ticks (1 ms here). delay(1) waits only until
   // the next tick boundary, which can be almost no time at all; delay(2) always sleeps at
-  // least one full tick. Motor commands arrive via the HTTPS server task, not loop(), so this
-  // adds no control lag; it only delays the captive portal DNS replies by up to 2 ms.
+  // least one full tick. Web motor commands arrive via the HTTPS server task, not loop(), so this
+  // adds no lag there; it delays RemoteXY app commands and captive portal DNS replies by up to
+  // 2 ms, far less than the app's own update interval.
   delay(2);
 }

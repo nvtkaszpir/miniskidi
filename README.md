@@ -59,8 +59,9 @@ The Arduino IDE does not install the versions pinned in `sketch.yaml`, so instal
 1. **File > Preferences > Additional boards manager URLs**: add
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
 2. **Tools > Board > Boards Manager**: search for `esp32` by Espressif Systems and install version **2.0.17**.
-3. **Sketch > Include Library > Manage Libraries**: install this version:
+3. **Sketch > Include Library > Manage Libraries**: install these versions:
    - `ESP32Servo` by Kevin Harrington: **3.2.1**
+   - `RemoteXY` by RemoteXY: **4.1.10**
 
    On Linux the IDE also runs `esptool.py` with the first `python` on
    `PATH`, so that Python needs `pyserial`
@@ -128,6 +129,64 @@ The control page asks for a user name and password:
 Change them with `webUser` and `webPassword` in `MiniSkidi_3_0.ino`. The
 browser remembers the login until it is closed. The login is sent over
 HTTPS, so it is encrypted.
+
+### RemoteXY app
+
+Besides the web page, the MiniSkidi can be driven with the
+[RemoteXY](https://remotexy.com/en/download/) app for Android and iOS. It
+connects over the same Wi-Fi (access point or client mode). The web page and
+the app can be used at the same time.
+
+#### One-time setup: the control layout
+
+The layout of the app's controls comes from the remotexy.com editor and is
+compiled into the firmware. Until you add one, the app part is off and the
+serial monitor shows `RemoteXY app control is off`.
+
+1. Open the [editor](https://remotexy.com/en/editor/), pick any WiFi
+   connection and the ESP32 board (the sketch uses only the layout, not these
+   settings).
+2. Add these elements and set each one's **Variable name** exactly as shown.
+   Position and order are up to you:
+
+   | Element  | Variable name | Controls                      |
+   |----------|---------------|-------------------------------|
+   | Joystick | `joystick`    | driving                       |
+   | Button   | `arm_up`      | arm up while held             |
+   | Button   | `arm_down`    | arm down while held           |
+   | Switch   | `light`       | lights                        |
+   | Slider   | `bucket`      | bucket tilt (range 0 to 100)  |
+   | Slider   | `aux`         | AUX servo (range 0 to 100)    |
+
+3. Click **Get source code**. Copy the `RemoteXY_CONF_PROGMEM` array and the
+   `struct { ... } RemoteXY;` below it, and replace everything after
+   `#pragma once` in [RemoteXYLayout.h](RemoteXYLayout.h) with them. This
+   also removes the `REMOTEXY_LAYOUT_PLACEHOLDER` line.
+4. Build and upload.
+
+#### Connecting the app
+
+In the app, add a new WiFi device by IP address (not a cloud device) and
+enter:
+
+- address: `192.168.4.1` in access point mode, or the IP address printed in
+  the serial monitor in client mode,
+- port: `6377`,
+- password: `skidi`.
+
+Change the port and password with `remoteXYPort` and `remoteXYPassword` in
+`MiniSkidi_3_0.ino`.
+
+The joystick drives forward, backward or turns in place. The motors are only
+on or off, so a small movement does the same as a full one. The center 30% of
+the joystick range is a dead zone.
+
+When the app disconnects, the motors stop. If the app is closed, they stop at
+once. If the phone goes out of Wi-Fi range, they stop after up to **8
+seconds**, the RemoteXY library's timeout.
+
+Unlike the web page, the RemoteXY connection is **not encrypted**. Anyone on
+the same Wi-Fi network can read the password and the commands.
 
 ### HTTPS and the certificate warning
 
