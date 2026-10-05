@@ -67,6 +67,28 @@ Copy the printed profile into `sketch.yaml`.
 
 ## Connecting
 
-1. Connect your phone to the Wi-Fi network `ProfBoots MiniSkidi OG` (password: `deadbeef`).
-2. Tap the **"Sign in to Wi-Fi network"** notification. The control page opens over Wi-Fi even when mobile data is on.
-3. If the notification does not appear, turn off mobile data and open `http://192.168.4.1` in a browser.
+`XXXXXX` below is the end of the ESP32 MAC address. The serial monitor
+prints the exact network name and hostname at startup.
+
+### Access point mode (default)
+
+The MiniSkidi creates its own Wi-Fi network.
+
+1. Connect your phone to the Wi-Fi network `ProfBoots MiniSkidi OG-XXXXXX`
+   (password: `deadbeef`).
+2. Tap the **"Sign in to Wi-Fi network"** notification. The control page
+   opens over Wi-Fi even when mobile data is on.
+3. If the notification does not appear, turn off mobile data and open
+   `http://192.168.4.1` or `http://miniskidi.local` in a browser.
+
+### Client mode
+
+The MiniSkidi joins an existing Wi-Fi network, for example your home router.
+
+1. In `MiniSkidi_3_0.ino`, set `staSsid` and `staPassphrase` to the network's
+   name and password, then upload.
+2. Open `http://miniskidi-xxxxxx.local` (lowercase) from a device on the same
+   network, or use the IP address printed in the serial monitor.
+
+If the MiniSkidi cannot connect within 15 seconds, it falls back to access
+point mode.

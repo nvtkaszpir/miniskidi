@@ -127,7 +127,9 @@ const char* htmlHomePage PROGMEM = R"HTMLHOMEPAGE(
       </tr> 
 
     </table>
-  
+
+    <footer id="deviceInfo" style="margin-top:30px;font-size:14px;color:grey;white-space:pre-line">Loading device info...</footer>
+
     <script>
       var webSocketCarInputUrl = "ws:\/\/" + window.location.hostname + "/CarInput";      
       var websocketCarInput;
@@ -143,8 +145,8 @@ const char* htmlHomePage PROGMEM = R"HTMLHOMEPAGE(
       
       function sendButtonInput(key, value) 
       {
-       var data = key + "," + value;
-       websocketCarInput.send(data);
+        var data = key + "," + value;
+        websocketCarInput.send(data);
       }
       function handleKeyDown(event) {
         if (event.keyCode === 38) {
@@ -206,13 +208,27 @@ const char* htmlHomePage PROGMEM = R"HTMLHOMEPAGE(
     }  
       
   
-      window.onload = initCarInputWebSocket;
+      function loadDeviceInfo()
+      {
+        var footer = document.getElementById("deviceInfo");
+        fetch("/info")
+          .then(function(response){ return response.json(); })
+          .then(function(info){
+            footer.textContent = "Hostname: " + info.hostname + "\nIP: " + info.ip + "\nMAC: " + info.mac;
+          })
+          .catch(function(){ footer.textContent = "Device info unavailable"; });
+      }
+
+      window.onload = function(){
+        initCarInputWebSocket();
+        loadDeviceInfo();
+      };
       document.getElementById("mainTable").addEventListener("touchend", function(event){
         event.preventDefault()
       });
       document.addEventListener('keydown', handleKeyDown);
       document.addEventListener('keyup', handleKeyUp); 
-           
+
     </script>
   </body>    
 </html>
