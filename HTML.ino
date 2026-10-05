@@ -131,7 +131,8 @@ const char* htmlHomePage PROGMEM = R"HTMLHOMEPAGE(
     <footer id="deviceInfo" style="margin-top:30px;font-size:14px;color:grey;white-space:pre-line">Loading device info...</footer>
 
     <script>
-      var webSocketCarInputUrl = "ws:\/\/" + window.location.hostname + "/CarInput";      
+      // wss:// on an https:// page, otherwise the browser blocks it as mixed content
+      var webSocketCarInputUrl = (window.location.protocol === "https:" ? "wss:\/\/" : "ws:\/\/") + window.location.host + "/CarInput";      
       var websocketCarInput;
       const auxSlider = document.getElementById('AUX');
       const bucketSlider = document.getElementById('Bucket');

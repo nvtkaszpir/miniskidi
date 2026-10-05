@@ -10,19 +10,27 @@
 #include <Arduino.h>
 
 #include <ESP32Servo.h> // by Kevin Harrington
-#include <ESPAsyncWebSrv.h> // by dvarrel
 #include <iostream>
 #include <sstream>
+#include <vector>
 
-#if defined(ESP32)
-#include <AsyncTCP.h> // by dvarrel
+// The rest is part of the esp32 core
 #include <WiFi.h>
-#include <DNSServer.h> // part of the esp32 core
-#include <ESPmDNS.h> // part of the esp32 core
-#elif defined(ESP8266)
-#include <ESPAsyncTCP.h> // by dvarrel
-#endif
+#include <WiFiUdp.h> // captive portal DNS (CaptivePortalDns.ino)
+#include <ESPmDNS.h>
+#include <Preferences.h>
 #include <esp_log.h>
+#include <esp_https_server.h> // ESP-IDF HTTP(S) server with WebSocket support
+#include <lwip/sockets.h>
+
+// Used by Certificate.ino
+#include <mbedtls/asn1.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/error.h>
+#include <mbedtls/oid.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/x509_crt.h>
 
 // logging
 // Log level printed to the serial console (115200 baud), from most to least output:
@@ -31,7 +39,7 @@
 // This controls the sketch's own messages. Logs from the esp32 core and libraries (WiFi, UART,
 // ESP32Servo, ...) are compiled in only up to "Tools > Core Debug Level" (or DebugLevel in
 // sketch.yaml), so set that to the same level. LOG_LEVEL NONE mutes them too.
-#define LOG_LEVEL ARDUHAL_LOG_LEVEL_INFO
+#define LOG_LEVEL ARDUHAL_LOG_LEVEL_DEBUG
 
 #if CORE_DEBUG_LEVEL < LOG_LEVEL
 #warning "Core Debug Level is lower than LOG_LEVEL: core and library logs will be missing. Raise Tools > Core Debug Level."
@@ -47,6 +55,9 @@
 #define LOGI(fmt, ...) LOG_AT(ARDUHAL_LOG_LEVEL_INFO, "I", fmt, ##__VA_ARGS__)
 #define LOGD(fmt, ...) LOG_AT(ARDUHAL_LOG_LEVEL_DEBUG, "D", fmt, ##__VA_ARGS__)
 #define LOGV(fmt, ...) LOG_AT(ARDUHAL_LOG_LEVEL_VERBOSE, "V", fmt, ##__VA_ARGS__)
+// Printed at every LOG_LEVEL, even NONE: for rare events the user must see, e.g. the long
+// pause while the TLS certificate is generated on first boot
+#define LOGA(letter, fmt, ...) LOG_AT(ARDUHAL_LOG_LEVEL_NONE, letter, fmt, ##__VA_ARGS__)
 
 
 // defines
@@ -73,15 +84,16 @@
 
 extern const char* htmlHomePage PROGMEM;
 // Access point mode (default): the ESP32 creates its own Wi-Fi network named
-// "<apSsidPrefix>-XXXXXX" and is reachable as http://192.168.4.1 or http://miniskidi.local.
+// "<apSsidPrefix>-XXXXXX" and is reachable as https://192.168.4.1 or https://miniskidi.local.
 // XXXXXX is the end of the ESP32 MAC address, so several MiniSkidis don't clash.
 const char* apSsidPrefix = "ProfBoots MiniSkidi OG";
 const char* apPassphrase = "deadbeef"; // at least 8 characters
 const int channel = 3; // wifi channel
 const char* hostnamePrefix = "miniskidi";
+const char* apDefaultIP = "192.168.4.1"; // IP of the ESP32 in access point mode
 
 // Client mode: set staSsid to join an existing Wi-Fi network instead. The hostname is then
-// "miniskidi-xxxxxx" (e.g. http://miniskidi-a1b2c3.local) and the IP comes from the router.
+// "miniskidi-xxxxxx" (e.g. https://miniskidi-a1b2c3.local) and the IP comes from the router.
 // If the connection fails within staConnectTimeoutMs, the ESP32 falls back to access point mode.
 const char* staSsid = ""; // empty = access point mode
 const char* staPassphrase = "";
@@ -93,6 +105,8 @@ String macSuffix;      // last 3 bytes of the factory MAC address, e.g. "A1B2C3"
 String deviceName;     // "<apSsidPrefix>-A1B2C3": access point SSID and mDNS instance name
 String deviceHostname; // "miniskidi" in access point mode, "miniskidi-a1b2c3" in client mode
 bool apMode = true;
+extern String tlsCertificatePem; // defined in Certificate.ino
+extern String tlsPrivateKeyPem;
 
 Servo bucketServo;
 Servo auxServo;
@@ -114,9 +128,13 @@ std::vector<MOTOR_PINS> motorPins =
   {21, 19}, //ARM_MOTOR pins
 };
 
-AsyncWebServer server(80);
-AsyncWebSocket wsCarInput("/CarInput");
-DNSServer dnsServer; // resolves every hostname to the AP IP, so phones detect a captive portal
+// Web servers (ESP-IDF esp_http_server): the control page and WebSocket are served over HTTPS
+// on port 443; plain HTTP on port 80 only redirects to HTTPS and answers captive portal checks.
+// All handlers of one server run on that server's own task, one at a time.
+httpd_handle_t httpsServer = NULL;
+httpd_handle_t httpServer = NULL;
+const int maxWebSocketClients = 4;
+int webSocketFds[maxWebSocketClients] = {-1, -1, -1, -1}; // sockets of connected /CarInput clients
 
 
 void rotateMotor(int motorNumber, int motorDirection)
@@ -273,108 +291,216 @@ void lightControl()
   }
 }
 
-void handleRoot(AsyncWebServerRequest *request)
+// Client IP of a request. The server listens on IPv6 and IPv4, so IPv4 clients show up as
+// IPv4-mapped IPv6 addresses (::ffff:a.b.c.d)
+String clientIP(httpd_req_t *req)
 {
-  LOGI("HTTP %s http://%s%s from %s", request->methodToString(), request->host().c_str(),
-       request->url().c_str(), request->client()->remoteIP().toString().c_str());
-  request->send_P(200, "text/html", htmlHomePage);
+  struct sockaddr_in6 addr;
+  socklen_t len = sizeof(addr);
+  if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&addr, &len) != 0)
+  {
+    return "?";
+  }
+  if (addr.sin6_family == AF_INET)
+  {
+    return IPAddress(((struct sockaddr_in *)&addr)->sin_addr.s_addr).toString();
+  }
+  return IPAddress(addr.sin6_addr.un.u32_addr[3]).toString();
+}
+
+String requestHeader(httpd_req_t *req, const char *name)
+{
+  char value[64];
+  if (httpd_req_get_hdr_value_str(req, name, value, sizeof(value)) != ESP_OK)
+  {
+    return "";
+  }
+  return String(value);
+}
+
+void logRequest(httpd_req_t *req, const char *scheme, const String &note)
+{
+  LOGI("HTTP %s %s://%s%s from %s%s", http_method_str((enum http_method)req->method), scheme,
+       requestHeader(req, "Host").c_str(), req->uri, clientIP(req).c_str(), note.c_str());
+}
+
+esp_err_t handleRoot(httpd_req_t *req)
+{
+  logRequest(req, "https", "");
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_send(req, htmlHomePage, HTTPD_RESP_USE_STRLEN);
 }
 
 // Device details shown in the page footer, e.g.
 // {"mode":"ap","hostname":"miniskidi.local","ip":"192.168.4.1","mac":"A0:B1:C2:A1:B2:C4"}
-void handleInfo(AsyncWebServerRequest *request)
+esp_err_t handleInfo(httpd_req_t *req)
 {
-  LOGI("HTTP %s http://%s%s from %s", request->methodToString(), request->host().c_str(),
-       request->url().c_str(), request->client()->remoteIP().toString().c_str());
+  logRequest(req, "https", "");
   // IP and MAC of the interface in use: the access point MAC is the factory MAC + 1
   String ip = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
   String mac = apMode ? WiFi.softAPmacAddress() : WiFi.macAddress();
   char json[160];
   snprintf(json, sizeof(json), "{\"mode\":\"%s\",\"hostname\":\"%s.local\",\"ip\":\"%s\",\"mac\":\"%s\"}",
            apMode ? "ap" : "client", deviceHostname.c_str(), ip.c_str(), mac.c_str());
-  request->send(200, "application/json", json);
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
-void handleNotFound(AsyncWebServerRequest *request)
+esp_err_t handleNotFound(httpd_req_t *req, httpd_err_code_t error)
 {
-  LOGI("HTTP %s http://%s%s from %s (no handler)", request->methodToString(),
-       request->host().c_str(), request->url().c_str(), request->client()->remoteIP().toString().c_str());
-  // Captive portal (access point mode only): redirect connectivity checks (e.g. Android
-  // /generate_204) and any foreign host to the control page, so the phone opens it in its
-  // sign-in browser, which always uses Wi-Fi.
-  if (apMode && (request->host() != WiFi.softAPIP().toString() || request->url() != "/"))
+  logRequest(req, "https", " (not found)");
+  return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File Not Found");
+}
+
+// Plain HTTP (port 80): everything is redirected to HTTPS.
+// Access point mode: this is also the captive portal. Connectivity checks (e.g. Android
+// /generate_204) and any other host are sent to the control page, so the phone shows
+// "Sign in to Wi-Fi network". Client mode: same host and path, over HTTPS.
+esp_err_t handleHttpRedirect(httpd_req_t *req)
+{
+  String host = requestHeader(req, "Host");
+  if (host.length() == 0)
   {
-    request->redirect("http://" + WiFi.softAPIP().toString() + "/");
-    return;
+    host = WiFi.localIP().toString();
   }
-  request->send(404, "text/plain", "File Not Found");
+  String location = apMode ? String("https://") + apDefaultIP + "/" : "https://" + host + req->uri;
+  logRequest(req, "http", " -> " + location);
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", location.c_str());
+  return httpd_resp_send(req, NULL, 0);
 }
 
-void onCarInputWebSocketEvent(AsyncWebSocket *server,
-                              AsyncWebSocketClient *client,
-                              AwsEventType type,
-                              void *arg,
-                              uint8_t *data,
-                              size_t len)
+void handleCarInput(const std::string &message)
 {
-  switch (type)
+  std::istringstream ss(message);
+  std::string key, value;
+  std::getline(ss, key, ',');
+  std::getline(ss, value, ',');
+  LOGD("Key [%s] Value[%s]", key.c_str(), value.c_str());
+  int valueInt = atoi(value.c_str());
+  if (key == "MoveCar")
   {
-    case WS_EVT_CONNECT:
-      LOGI("WebSocket client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
-      break;
-    case WS_EVT_DISCONNECT:
-      LOGI("WebSocket client #%u disconnected", client->id());
+    moveCar(valueInt);
+  }
+  else if (key == "AUX")
+  {
+    auxControl(valueInt);
+  }
+  else if (key == "Bucket")
+  {
+    bucketTilt(valueInt);
+  }
+  else if (key == "Light")
+  {
+    lightControl();
+  }
+  else if (key == "Switch")
+  {
+    if (!(horizontalScreen))
+    {
+      horizontalScreen = true;
+    }
+    else {
+      horizontalScreen = false;
+    }
+  }
+}
+
+void rememberWebSocket(int fd)
+{
+  for (int i = 0; i < maxWebSocketClients; i++)
+  {
+    if (webSocketFds[i] == -1)
+    {
+      webSocketFds[i] = fd;
+      return;
+    }
+  }
+}
+
+bool forgetWebSocket(int fd)
+{
+  for (int i = 0; i < maxWebSocketClients; i++)
+  {
+    if (webSocketFds[i] == fd)
+    {
+      webSocketFds[i] = -1;
+      return true;
+    }
+  }
+  return false;
+}
+
+// /CarInput WebSocket: called once for the handshake, then for every received data frame
+// (ping/pong/close frames are answered by the server itself)
+esp_err_t handleCarInputWebSocket(httpd_req_t *req)
+{
+  int fd = httpd_req_to_sockfd(req);
+  if (req->method == HTTP_GET)
+  {
+    rememberWebSocket(fd);
+    LOGI("WebSocket client connected from %s (socket %d)", clientIP(req).c_str(), fd);
+    LOGD("Free heap: %u bytes", ESP.getFreeHeap());
+    return ESP_OK;
+  }
+
+  httpd_ws_frame_t frame;
+  memset(&frame, 0, sizeof(frame));
+  // With max_len 0 only the frame header is read, to get the length
+  esp_err_t err = httpd_ws_recv_frame(req, &frame, 0);
+  if (err != ESP_OK)
+  {
+    LOGE("WebSocket receive failed (socket %d): %s", fd, esp_err_to_name(err));
+    return err;
+  }
+  char buf[129];
+  if (frame.len >= sizeof(buf))
+  {
+    LOGW("WebSocket message too long (%u bytes), closing socket %d", frame.len, fd);
+    return ESP_FAIL;
+  }
+  frame.payload = (uint8_t *)buf;
+  // The payload must always be read, even for frames that are ignored below
+  err = httpd_ws_recv_frame(req, &frame, frame.len);
+  if (err != ESP_OK)
+  {
+    LOGE("WebSocket receive failed (socket %d): %s", fd, esp_err_to_name(err));
+    return err;
+  }
+  if (frame.type != HTTPD_WS_TYPE_TEXT || !frame.final)
+  {
+    LOGW("Ignoring WebSocket frame type %d (final %d) on socket %d", frame.type, frame.final, fd);
+    return ESP_OK;
+  }
+  handleCarInput(std::string(buf, frame.len));
+  return ESP_OK;
+}
+
+// Called by the HTTPS server for every closed connection, before it closes the socket itself.
+// Stopping the motors here is a safety feature: the machine must not keep driving when the
+// phone disconnects (tab closed, out of Wi-Fi range, ...).
+void onHttpsSocketClose(httpd_handle_t hd, int sockfd)
+{
+  if (forgetWebSocket(sockfd))
+  {
+    LOGI("WebSocket client disconnected (socket %d), stopping motors", sockfd);
+    moveCar(STOP);
+    LOGD("Free heap: %u bytes", ESP.getFreeHeap());
+  }
+}
+
+// Backup for onHttpsSocketClose, queued from loop() to run on the HTTPS server task (so it
+// never runs at the same time as the handlers). Stops the motors if a WebSocket client is gone.
+void checkWebSocketClients(void *arg)
+{
+  for (int i = 0; i < maxWebSocketClients; i++)
+  {
+    if (webSocketFds[i] != -1 && httpd_ws_get_fd_info(httpsServer, webSocketFds[i]) != HTTPD_WS_CLIENT_WEBSOCKET)
+    {
+      LOGW("WebSocket client (socket %d) is gone, stopping motors", webSocketFds[i]);
+      webSocketFds[i] = -1;
       moveCar(STOP);
-      break;
-    case WS_EVT_DATA:
-      AwsFrameInfo *info;
-      info = (AwsFrameInfo*)arg;
-      if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT)
-      {
-        std::string myData = "";
-        myData.assign((char *)data, len);
-        std::istringstream ss(myData);
-        std::string key, value;
-        std::getline(ss, key, ',');
-        std::getline(ss, value, ',');
-        LOGD("Key [%s] Value[%s]", key.c_str(), value.c_str());
-        int valueInt = atoi(value.c_str());
-        if (key == "MoveCar")
-        {
-          moveCar(valueInt);
-        }
-        else if (key == "AUX")
-        {
-          auxControl(valueInt);
-        }
-        else if (key == "Bucket")
-        {
-          bucketTilt(valueInt);
-        }
-        else if (key == "Light")
-        {
-          lightControl();
-        }
-        else if (key == "Switch")
-        {
-          if (!(horizontalScreen))
-          {
-            horizontalScreen = true;
-          }
-          else {
-            horizontalScreen = false;
-          }
-        }
-      }
-      break;
-    case WS_EVT_PONG:
-      LOGV("WebSocket client #%u pong", client->id());
-      break;
-    case WS_EVT_ERROR:
-      LOGE("WebSocket client #%u error", client->id());
-      break;
-    default:
-      break;
+    }
   }
 }
 
@@ -444,7 +570,74 @@ void startAccessPoint()
   WiFi.softAPsetHostname(deviceHostname.c_str());
   IPAddress IP = WiFi.softAPIP();
   LOGI("Access point \"%s\" started, IP address: %s", deviceName.c_str(), IP.toString().c_str());
-  dnsServer.start(53, "*", IP);
+  captiveDnsStart(IP);
+}
+
+// Start HTTPS on port 443 (page, /info, /CarInput WebSocket) and HTTP on port 80 (redirects)
+bool startWebServers()
+{
+  httpd_ssl_config_t https = HTTPD_SSL_CONFIG_DEFAULT();
+  // In this ESP-IDF version "cacert" is the server's own certificate; lengths include the NUL
+  https.cacert_pem = (const uint8_t *)tlsCertificatePem.c_str();
+  https.cacert_len = tlsCertificatePem.length() + 1;
+  https.prvtkey_pem = (const uint8_t *)tlsPrivateKeyPem.c_str();
+  https.prvtkey_len = tlsPrivateKeyPem.length() + 1;
+  // Each TLS connection needs about 35-40 KB of heap (fixed 16 KB buffers per direction), so
+  // the number of connections is capped. When all are in use, the least recently used one is
+  // closed to make room for a new one. 3 is enough for one phone: the page and /info share a
+  // keep-alive connection, the WebSocket has its own, and one is spare.
+  https.httpd.max_open_sockets = 3;
+  https.httpd.lru_purge_enable = true;
+  https.httpd.close_fn = onHttpsSocketClose;
+  esp_err_t err = httpd_ssl_start(&httpsServer, &https);
+  if (err != ESP_OK)
+  {
+    LOGE("HTTPS server failed to start: %s", esp_err_to_name(err));
+    return false;
+  }
+
+  httpd_uri_t root = {};
+  root.uri = "/";
+  root.method = HTTP_GET;
+  root.handler = handleRoot;
+  httpd_register_uri_handler(httpsServer, &root);
+
+  httpd_uri_t info = {};
+  info.uri = "/info";
+  info.method = HTTP_GET;
+  info.handler = handleInfo;
+  httpd_register_uri_handler(httpsServer, &info);
+
+  httpd_uri_t carInput = {};
+  carInput.uri = "/CarInput";
+  carInput.method = HTTP_GET;
+  carInput.handler = handleCarInputWebSocket;
+  carInput.is_websocket = true;
+  httpd_register_uri_handler(httpsServer, &carInput);
+
+  httpd_register_err_handler(httpsServer, HTTPD_404_NOT_FOUND, handleNotFound);
+  LOGI("HTTPS server started on port %d", https.port_secure);
+
+  httpd_config_t http = HTTPD_DEFAULT_CONFIG();
+  http.server_port = 80;
+  http.ctrl_port = 32769; // the HTTPS server uses the default 32768
+  http.max_open_sockets = 3;
+  http.lru_purge_enable = true;
+  http.uri_match_fn = httpd_uri_match_wildcard;
+  err = httpd_start(&httpServer, &http);
+  if (err != ESP_OK)
+  {
+    LOGE("HTTP redirect server failed to start: %s", esp_err_to_name(err));
+    return true; // HTTPS still works
+  }
+  httpd_uri_t redirect = {};
+  redirect.uri = "/*";
+  redirect.method = HTTP_GET;
+  redirect.handler = handleHttpRedirect;
+  httpd_register_uri_handler(httpServer, &redirect);
+  LOGI("HTTP server started on port 80 (redirects to HTTPS)");
+  LOGI("Heap after start: free %u, largest block %u bytes", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  return true;
 }
 
 void setup(void)
@@ -471,6 +664,7 @@ void setup(void)
   if (MDNS.begin(deviceHostname.c_str()))
   {
     MDNS.setInstanceName(deviceName);
+    MDNS.addService("https", "tcp", 443);
     MDNS.addService("http", "tcp", 80);
     LOGI("mDNS responder started: %s.local", deviceHostname.c_str());
   }
@@ -479,33 +673,48 @@ void setup(void)
     LOGE("mDNS responder failed to start");
   }
 
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/info", HTTP_GET, handleInfo);
-  server.onNotFound(handleNotFound);
-
-  wsCarInput.onEvent(onCarInputWebSocketEvent);
-  server.addHandler(&wsCarInput);
-
-  server.begin();
-  LOGI("HTTP server started");
-
+  // After Wi-Fi: the certificate includes the client-mode IP. If generating a new one fails,
+  // a previously stored certificate is still used.
+  if (!ensureCertificate() && tlsCertificatePem.length() == 0)
+  {
+    LOGE("No TLS certificate, web server not started");
+    return;
+  }
+  startWebServers();
 }
 
 void loop()
 {
   if (apMode)
   {
-    dnsServer.processNextRequest();
+    captiveDnsLoop();
   }
-  wsCarInput.cleanupClients();
-  // Without a delay loop() spins at 100% CPU on core 1 and never blocks. The WebSocket/HTTP
-  // handling is not affected (the async_tcp task has a higher priority and preempts loop()),
+
+  static unsigned long lastWebSocketCheck = 0;
+  if (httpsServer != NULL && millis() - lastWebSocketCheck >= 200)
+  {
+    lastWebSocketCheck = millis();
+    httpd_queue_work(httpsServer, checkWebSocketClients, NULL);
+  }
+
+  // Heap status: each new TLS connection needs two contiguous ~16.7 KB buffers, so if
+  // "largest block" drops below ~17 KB or "free" below ~40 KB, new HTTPS connections fail
+  static unsigned long lastHeapLog = 0;
+  if (millis() - lastHeapLog >= 5000)
+  {
+    lastHeapLog = millis();
+    LOGD("Heap: free %u, largest block %u, lowest free since boot %u bytes",
+         ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
+  }
+
+  // Without a delay loop() spins at 100% CPU on core 1 and never blocks. The web servers are
+  // not affected (their tasks have a higher priority, tskIDLE_PRIORITY+5, and preempt loop()),
   // but the idle task on core 1 never runs: it can't free the memory of deleted tasks and the
   // CPU never idles, which wastes battery and heats the chip. delay() blocks the task and
   // lets everything else run.
   // Why 2 ms: delay() sleeps in whole FreeRTOS ticks (1 ms here). delay(1) waits only until
   // the next tick boundary, which can be almost no time at all; delay(2) always sleeps at
-  // least one full tick. Motor commands arrive via the async_tcp task, not loop(), so this
+  // least one full tick. Motor commands arrive via the HTTPS server task, not loop(), so this
   // adds no control lag; it only delays the captive portal DNS replies by up to 2 ms.
   delay(2);
 }
