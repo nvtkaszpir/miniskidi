@@ -118,6 +118,17 @@ The MiniSkidi joins an existing Wi-Fi network, for example your home router.
 If the MiniSkidi cannot connect within 15 seconds, it falls back to access
 point mode.
 
+### Login
+
+The control page asks for a user name and password:
+
+- user: `mini`
+- password: `skidi`
+
+Change them with `webUser` and `webPassword` in `MiniSkidi_3_0.ino`. The
+browser remembers the login until it is closed. The login is sent over
+HTTPS, so it is encrypted.
+
 ### HTTPS and the certificate warning
 
 The control page is served over HTTPS. Plain `http://` addresses redirect to

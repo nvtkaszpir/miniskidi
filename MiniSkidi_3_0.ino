@@ -24,6 +24,7 @@
 #include <lwip/sockets.h>
 
 // Used by Certificate.ino
+#include <mbedtls/base64.h> // Basic authentication header
 #include <mbedtls/asn1.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -98,6 +99,10 @@ const char* apDefaultIP = "192.168.4.1"; // IP of the ESP32 in access point mode
 const char* staSsid = ""; // empty = access point mode
 const char* staPassphrase = "";
 const unsigned long staConnectTimeoutMs = 15000;
+
+// Login for the web page (HTTP Basic authentication; the password is protected by HTTPS)
+const char* webUser = "mini";
+const char* webPassword = "skidi";
 
 // global variables
 
@@ -310,7 +315,7 @@ String clientIP(httpd_req_t *req)
 
 String requestHeader(httpd_req_t *req, const char *name)
 {
-  char value[64];
+  char value[160];
   if (httpd_req_get_hdr_value_str(req, name, value, sizeof(value)) != ESP_OK)
   {
     return "";
@@ -324,8 +329,71 @@ void logRequest(httpd_req_t *req, const char *scheme, const String &note)
        requestHeader(req, "Host").c_str(), req->uri, clientIP(req).c_str(), note.c_str());
 }
 
+// Expected "Authorization" header value: "Basic " + base64("user:password")
+String basicAuthExpected()
+{
+  static String expected;
+  if (expected.length() == 0)
+  {
+    String credentials = String(webUser) + ":" + webPassword;
+    unsigned char encoded[200];
+    size_t encodedLen = 0;
+    if (mbedtls_base64_encode(encoded, sizeof(encoded), &encodedLen,
+                              (const unsigned char *)credentials.c_str(), credentials.length()) == 0)
+    {
+      expected = "Basic " + String((const char *)encoded);
+    }
+  }
+  return expected;
+}
+
+// Compares in constant time, so the response time doesn't reveal how much of the password matched
+bool constantTimeEquals(const String &a, const String &b)
+{
+  if (a.length() != b.length())
+  {
+    return false;
+  }
+  uint8_t diff = 0;
+  for (size_t i = 0; i < a.length(); i++)
+  {
+    diff |= a[i] ^ b[i];
+  }
+  return diff == 0;
+}
+
+// True if the request has the right user/password. Browsers ask for the login after the first
+// 401 and then send it with every request to this site, including the WebSocket handshake.
+bool isAuthorized(httpd_req_t *req)
+{
+  String received = requestHeader(req, "Authorization");
+  if (received.length() > 0 && constantTimeEquals(received, basicAuthExpected()))
+  {
+    return true;
+  }
+  if (received.length() > 0)
+  {
+    LOGW("Wrong web login from %s", clientIP(req).c_str());
+  }
+  return false;
+}
+
+// Ask the browser for the login
+esp_err_t sendUnauthorized(httpd_req_t *req)
+{
+  logRequest(req, "https", " (login required)");
+  httpd_resp_set_status(req, "401 Unauthorized");
+  httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"MiniSkidi\", charset=\"UTF-8\"");
+  httpd_resp_set_type(req, "text/plain");
+  return httpd_resp_send(req, "Login required", HTTPD_RESP_USE_STRLEN);
+}
+
 esp_err_t handleRoot(httpd_req_t *req)
 {
+  if (!isAuthorized(req))
+  {
+    return sendUnauthorized(req);
+  }
   logRequest(req, "https", "");
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, htmlHomePage, HTTPD_RESP_USE_STRLEN);
@@ -335,6 +403,10 @@ esp_err_t handleRoot(httpd_req_t *req)
 // {"mode":"ap","hostname":"miniskidi.local","ip":"192.168.4.1","mac":"A0:B1:C2:A1:B2:C4"}
 esp_err_t handleInfo(httpd_req_t *req)
 {
+  if (!isAuthorized(req))
+  {
+    return sendUnauthorized(req);
+  }
   logRequest(req, "https", "");
   // IP and MAC of the interface in use: the access point MAC is the factory MAC + 1
   String ip = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
@@ -418,6 +490,18 @@ void rememberWebSocket(int fd)
   }
 }
 
+bool isRememberedWebSocket(int fd)
+{
+  for (int i = 0; i < maxWebSocketClients; i++)
+  {
+    if (webSocketFds[i] == fd)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool forgetWebSocket(int fd)
 {
   for (int i = 0; i < maxWebSocketClients; i++)
@@ -438,10 +522,24 @@ esp_err_t handleCarInputWebSocket(httpd_req_t *req)
   int fd = httpd_req_to_sockfd(req);
   if (req->method == HTTP_GET)
   {
+    // The server has already answered the handshake when this runs, so a 401 isn't possible:
+    // without the login the connection is closed instead (ESP_FAIL)
+    if (!isAuthorized(req))
+    {
+      LOGW("WebSocket from %s without valid login, closing socket %d", clientIP(req).c_str(), fd);
+      return ESP_FAIL;
+    }
     rememberWebSocket(fd);
     LOGI("WebSocket client connected from %s (socket %d)", clientIP(req).c_str(), fd);
     LOGD("Free heap: %u bytes", ESP.getFreeHeap());
     return ESP_OK;
+  }
+
+  // Only sockets that passed the login check at the handshake may send commands
+  if (!isRememberedWebSocket(fd))
+  {
+    LOGW("WebSocket data on socket %d without login, closing", fd);
+    return ESP_FAIL;
   }
 
   httpd_ws_frame_t frame;
@@ -698,7 +796,8 @@ void loop()
   }
 
   // Heap status: each new TLS connection needs two contiguous ~16.7 KB buffers, so if
-  // "largest block" drops below ~17 KB or "free" below ~40 KB, new HTTPS connections fail
+  // "largest block" drops below ~17 KB or "free" below ~40 KB, new HTTPS connections fail.
+  // Logged at VERBOSE only (set LOG_LEVEL to VERBOSE to see it when chasing memory problems).
   static unsigned long lastHeapLog = 0;
   if (millis() - lastHeapLog >= 5000)
   {
