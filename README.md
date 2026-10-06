@@ -28,7 +28,7 @@ so other sketches are not affected.
    [uv](https://docs.astral.sh/uv/):
 
    ```bash
-   uv sync
+   uv sync --frozen
    ```
 
    This creates `.venv` in the sketch folder. `uv run` puts it first on
@@ -102,7 +102,7 @@ setup.
   API, so there is nothing to install from an app store. It is free and
   open source, with no account or cloud service.
 - Web Bluetooth only works on `https://` pages, so the app is hosted on
-  GitHub Pages (free). After the first visit it also works offline, and it
+  GitHub Pages (free), right . After the first visit it also works offline, and it
   can be installed to the home screen like an app.
 
 iPhones are not supported: Safari and the other iOS browsers have no Web
@@ -118,6 +118,10 @@ Bluetooth.
    publishes the `web/` folder on every push that changes it. The address
    is shown in the workflow run and on the Pages settings page, for example
    `https://<your-user>.github.io/<repository>/`.
+
+   In this repo - visit [https://nvtkaszpir.github.io/miniskidi/](https://nvtkaszpir.github.io/miniskidi/)
+  for the currently rendered github pages.
+
 
 After changing files in `web/`, raise `CACHE` in [web/sw.js](web/sw.js)
 (for example `miniskidi-v2`), so installed apps load the new version.
