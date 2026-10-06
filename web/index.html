@@ -205,6 +205,22 @@
     pointer-events: none;
   }
   .stick.released .knob { transition: transform .12s ease-out; }
+  /* Zones drawn on the stick base (SVG, see drawZones()) */
+  .stick .zones {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .zones .wedge { fill: transparent; stroke: var(--stick-ring); stroke-width: 0.8; }
+  .zones .wedge.active { fill: rgba(232, 89, 12, .28); }
+  .zones .dead { fill: rgba(0, 0, 0, .25); stroke: var(--stick-ring); stroke-width: 0.8; stroke-dasharray: 3 3; }
+  .zones .band { fill: rgba(0, 0, 0, .22); }
+  .zones text { fill: var(--muted); font-size: 8px; text-anchor: middle; dominant-baseline: middle; }
+  .zones text.small { font-size: 6.5px; }
+  .zones text.active { fill: #fff; }
   .stick .label {
     position: absolute;
     left: 0; right: 0;
@@ -396,7 +412,7 @@
 
   <!-- Joystick tab -->
   <section id="joystick" class="panel">
-    <div id="stickLeft" class="stick released"><div class="knob"></div><div class="label"></div></div>
+    <div id="stickLeft" class="stick released"><svg class="zones" viewBox="-100 -100 200 200"></svg><div class="knob"></div><div class="label"></div></div>
     <div id="joyCenter">
       <button id="lightBtn" title="Lights on/off">&#9788;</button>
       <div id="joyValues"></div>
@@ -404,7 +420,7 @@
     </div>
     <div id="attach" title="Attachment"><div class="fill"></div><div class="thumb"></div></div>
     <div id="attachLabel">Attach</div>
-    <div id="stickRight" class="stick released"><div class="knob"></div><div class="label"></div></div>
+    <div id="stickRight" class="stick released"><svg class="zones" viewBox="-100 -100 200 200"></svg><div class="knob"></div><div class="label"></div></div>
   </section>
 
   <!-- Settings tab -->
@@ -420,15 +436,19 @@
         <input type="checkbox" id="setSwapTiltLift" data-setting="swapTiltLift">
       </div>
       <div class="row">
-        <label for="setInvTilt">Invert bucket tilt</label>
+        <label for="setInvTilt">Invert bucket tilt<small>Turn on if pushing right tilts the bucket down instead of up.</small></label>
         <input type="checkbox" id="setInvTilt" data-setting="invTilt">
       </div>
       <div class="row">
-        <label for="setInvLift">Invert boom lift</label>
+        <label for="setInvLift">Invert boom lift<small>Turn on if pushing up lowers the boom instead of raising it.</small></label>
         <input type="checkbox" id="setInvLift" data-setting="invLift">
       </div>
       <div class="row">
-        <label for="setDeadZone">Dead zone: <span id="deadZoneValue">15</span>%<small>Small stick movements are ignored, separately for each direction: pushing sideways doesn't also move the up/down function.</small></label>
+        <label for="setArmZones">8 direction zones on the arm stick<small>Straight up: boom only. Up-right: boom and bucket together. Right: bucket only, and so on.</small></label>
+        <input type="checkbox" id="setArmZones" data-setting="armZones">
+      </div>
+      <div class="row">
+        <label for="setDeadZone">Dead zone: <span id="deadZoneValue">15</span>%<small>Small stick movements are ignored. Drawn on the sticks: the circle in the middle of the arm stick, the cross on the drive stick.</small></label>
         <input type="range" id="setDeadZone" data-range="deadZone" min="0" max="40" step="1" value="15">
       </div>
 
@@ -763,16 +783,22 @@ function localOffset(event, el) {
 // ---------------------------------------------------------------- Joysticks
 
 const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15,
-                   driveMinDuty: 90, armMinDuty: 90 };
+                   driveMinDuty: 90, armMinDuty: 90, armZones: true };
+
+// The 8 zones of the arm stick, counter-clockwise from right (east): stick direction x, y
+const ZONE_DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+const KNOB_TRAVEL = 0.62; // knob travel radius, part of the base radius
 
 // A stick follows one finger (pointer). Output x, y: -1..1, y up positive, dead zone applied.
 class Stick {
   constructor(el) {
     this.el = el;
     this.knob = el.querySelector(".knob");
+    this.zonesEl = el.querySelector(".zones");
     this.pointerId = null;
     this.x = 0;
     this.y = 0;
+    this.zone = -1; // active zone of a zoned stick, -1 = none
     el.addEventListener("pointerdown", (e) => this.down(e));
     el.addEventListener("pointermove", (e) => this.move(e));
     for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
@@ -791,18 +817,28 @@ class Stick {
     if (e.pointerId !== this.pointerId) return;
     e.preventDefault();
     const o = localOffset(e, this.el);
-    const radius = o.w / 2 * 0.62; // knob travel, keeps the knob inside the base
+    const radius = o.w / 2 * KNOB_TRAVEL; // keeps the knob inside the base
     let nx = o.x / radius, ny = -o.y / radius;
     const mag = Math.hypot(nx, ny);
     if (mag > 1) { nx /= mag; ny /= mag; }
     this.knob.style.transform = "translate(" + (nx * radius) + "px," + (-ny * radius) + "px)";
-    // Dead zone per axis, rescaled so the output starts at 0 at its edge. Per axis (not a circle)
-    // so pushing sideways doesn't also send a small up/down value: the boom motor would move
-    // with it, at its full start power.
     const dz = settings.deadZone / 100;
-    const axis = (v) => Math.abs(v) <= dz ? 0 : Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
-    this.x = axis(nx);
-    this.y = axis(ny);
+    if (this.zoned()) {
+      // 8 zones of 45°: the direction snaps to the nearest of up, up-right, right, ... and the
+      // distance from the center (outside the round dead zone) sets the speed
+      const m = Math.min(mag, 1);
+      const zone = m <= dz ? -1 : (Math.round(Math.atan2(ny, nx) / (Math.PI / 4)) + 8) % 8;
+      const speed = zone < 0 ? 0 : (m - dz) / (1 - dz);
+      this.x = zone < 0 ? 0 : ZONE_DIRS[zone][0] * speed;
+      this.y = zone < 0 ? 0 : ZONE_DIRS[zone][1] * speed;
+      this.setZone(zone);
+    } else {
+      // Dead zone per axis, rescaled so the output starts at 0 at its edge. Per axis (not a
+      // circle) so pushing sideways doesn't also send a small up/down value.
+      const axis = (v) => Math.abs(v) <= dz ? 0 : Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
+      this.x = axis(nx);
+      this.y = axis(ny);
+    }
     joystickChanged();
   }
   up(e) {
@@ -812,9 +848,23 @@ class Stick {
   release() {
     this.pointerId = null;
     this.x = this.y = 0;
+    this.setZone(-1);
     this.el.classList.add("released");
     this.knob.style.transform = "";
     joystickChanged();
+  }
+  isArm() {
+    return this === (settings.swapSticks ? stickLeft : stickRight);
+  }
+  zoned() {
+    return this.isArm() && settings.armZones;
+  }
+  setZone(zone) {
+    if (zone === this.zone) return;
+    this.zone = zone;
+    this.zonesEl.querySelectorAll("[data-zone]").forEach((el) => {
+      el.classList.toggle("active", Number(el.dataset.zone) === zone);
+    });
   }
   setLabel(text) {
     this.el.querySelector(".label").textContent = text;
@@ -877,7 +927,7 @@ function joystickValues() {
 function joystickChanged() {
   const v = joystickValues();
   const frame = "Joy," + v.turn + "," + v.drive + "," + v.tilt + "," + v.lift;
-  $("joyValues").textContent = "turn " + v.turn + "  drive " + v.drive + "\ntilt " + v.tilt + "  lift " + v.lift;
+  $("joyValues").textContent = "drive " + v.drive + "  turn " + v.turn + "\nboom " + v.lift + "  bucket " + v.tilt;
   if (frame !== lastJoyFrame) {
     lastJoyFrame = frame;
     lastJoyTime = performance.now();
@@ -886,10 +936,74 @@ function joystickChanged() {
 }
 
 function updateStickLabels() {
-  const armLabel = settings.swapTiltLift ? "↔ lift  ↕ tilt" : "↔ tilt  ↕ lift";
-  const driveLabel = "↔ turn  ↕ drive";
+  const armLabel = settings.swapTiltLift ? "↕ bucket  ↔ boom" : "↕ boom  ↔ bucket";
+  const driveLabel = "↕ drive  ↔ turn";
   stickLeft.setLabel(settings.swapSticks ? armLabel : driveLabel);
   stickRight.setLabel(settings.swapSticks ? driveLabel : armLabel);
+  drawZones(stickLeft);
+  drawZones(stickRight);
+}
+
+// What an arm stick direction does: e.g. ["Boom ↑", "Bucket ↑"]. ISO layout by default: up boom
+// up, down boom down, right bucket up (curl), left bucket down. The invert settings are left out
+// on purpose: they correct a motor or servo that runs the other way, so that these labels come true.
+function armActions(dx, dy) {
+  const tilt = settings.swapTiltLift ? dy : dx;
+  const lift = settings.swapTiltLift ? dx : dy;
+  const parts = [];
+  if (lift) parts.push("Boom " + (lift > 0 ? "↑" : "↓"));
+  if (tilt) parts.push("Bucket " + (tilt > 0 ? "↑" : "↓"));
+  return parts;
+}
+
+// Draws the zones on a stick base (viewBox -100..100, base radius 100, y down):
+// arm stick with zones: round dead zone + 8 wedges with what each one does;
+// otherwise: the per-axis dead zone as a cross of two bands.
+function drawZones(stick) {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = stick.zonesEl;
+  svg.replaceChildren();
+  const add = (tag, attrs, text) => {
+    const el = document.createElementNS(svgNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (text !== undefined) el.textContent = text;
+    svg.appendChild(el);
+    return el;
+  };
+  const travel = 100 * KNOB_TRAVEL;
+  const dead = travel * settings.deadZone / 100;
+  if (stick.zoned()) {
+    const pt = (r, deg) => {
+      const a = deg * Math.PI / 180;
+      return (r * Math.cos(a)).toFixed(2) + " " + (-r * Math.sin(a)).toFixed(2);
+    };
+    const inner = Math.max(dead, 1);
+    ZONE_DIRS.forEach(([dx, dy], k) => {
+      const a0 = k * 45 - 22.5, a1 = k * 45 + 22.5;
+      // Wedge between the dead zone and the edge (counter-clockwise on screen = sweep 0)
+      add("path", {
+        class: "wedge", "data-zone": k,
+        d: "M" + pt(inner, a0) + " L" + pt(98, a0) + " A98 98 0 0 0 " + pt(98, a1) +
+           " L" + pt(inner, a1) + " A" + inner + " " + inner + " 0 0 1 " + pt(inner, a0) + "Z",
+      });
+      const parts = armActions(dx, dy);
+      const diagonal = dx && dy;
+      const r = diagonal ? 80 : 84;
+      const [x, y] = pt(r, k * 45).split(" ").map(Number);
+      parts.forEach((text, i) => {
+        add("text", {
+          class: diagonal ? "small" : "", "data-zone": k,
+          x: x, y: y + (i - (parts.length - 1) / 2) * 8,
+        }, text);
+      });
+    });
+    add("circle", { class: "dead", r: dead.toFixed(2) });
+  } else if (dead > 0) {
+    add("rect", { class: "band", x: -dead, y: -98, width: 2 * dead, height: 196, rx: 2 });
+    add("rect", { class: "band", x: -98, y: -dead, width: 196, height: 2 * dead, rx: 2 });
+  }
+  stick.zone = -2; // force setZone() to re-apply the highlight
+  stick.setZone(-1);
 }
 
 function releaseSticks() {
@@ -928,6 +1042,7 @@ function applySettings(s) {
   settings.swapTiltLift = !!s.swapTiltLift;
   settings.invTilt = !!s.invTilt;
   settings.invLift = !!s.invLift;
+  settings.armZones = s.armZones === undefined ? true : !!s.armZones; // older firmware: default
   document.querySelectorAll("[data-setting]").forEach((box) => { box.checked = settings[box.dataset.setting]; });
   document.querySelectorAll("[data-range]").forEach((range) => {
     const name = range.dataset.range;
@@ -951,6 +1066,7 @@ document.querySelectorAll("[data-range]").forEach((range) => {
   range.addEventListener("input", () => {
     settings[name] = parseInt(range.value, 10);
     $(name + "Value").textContent = settings[name];
+    if (name === "deadZone") updateStickLabels(); // redraw the zones
   });
   range.addEventListener("change", () => send("Set," + name + "," + range.value));
 });

@@ -192,10 +192,22 @@ Landscape layout, the same as the former RemoteXY screen:
 | Control                    | Left / right            | Up / down          |
 |----------------------------|-------------------------|--------------------|
 | Left joystick              | turn left / right       | forward / backward |
-| Right joystick             | bucket tilt             | boom lift up / down |
+| Right joystick             | bucket down / up        | boom up / down     |
 | Vertical slider ("Attach") | attachment (AUX) servo, bottom 0 to top 100 | |
 | ☼ button                   | lights on / off         |                    |
 
+- The right joystick follows the ISO control pattern: up raises the boom,
+  down lowers it, right tilts the bucket up (curl), left tilts it down
+  (dump). If the boom or bucket moves the wrong way on your machine, use
+  **Invert boom lift** / **Invert bucket tilt** in Settings.
+- The right joystick is split into 8 zones, drawn on it: straight up only
+  moves the boom, up-right moves the boom up and the bucket up together,
+  right only tilts the bucket, and so on. The direction snaps to the zone
+  your thumb is in, so a slightly crooked push doesn't move the other
+  function; how far you push still sets the speed. The zone in use lights
+  up. This can be turned off in Settings.
+- The dead zone is drawn on both sticks: the circle in the middle of the
+  right stick, the cross on the left stick.
 - Both joysticks can be used at the same time with two thumbs.
 - Speed follows how far a stick is pushed. Pushing the drive stick
   diagonally makes curves; sideways only turns on the spot.
@@ -205,9 +217,9 @@ Landscape layout, the same as the former RemoteXY screen:
   while the stick is pushed and stays where it is when the stick is let go.
   It moves between 10° and 180°, the same range as the Classic slider.
 - Small movements (the dead zone, 15% by default) are ignored, so a resting
-  thumb doesn't move the machine. The dead zone works separately for each
-  direction: pushing the right stick sideways to tilt the bucket doesn't
-  also move the boom with a slightly crooked thumb.
+  thumb doesn't move the machine. On the left stick (and on the right one
+  with the zones turned off) it works separately for each direction, so
+  pushing sideways doesn't also send a small forward/backward value.
 - Even the smallest movement outside the dead zone gives the motors their
   start power (Settings), so they don't just hum.
 - The boom stops as soon as the stick is released, without the Classic
@@ -220,7 +232,9 @@ Landscape layout, the same as the former RemoteXY screen:
 
 - **Swap joysticks**: driving on the right stick, bucket and boom on the left
 - **Swap bucket tilt and boom lift**: boom on horizontal, bucket on vertical
-- **Invert bucket tilt**, **Invert boom lift**
+- **Invert bucket tilt**, **Invert boom lift**: for a servo or motor that
+  runs the other way, so the stick matches the labels drawn on it
+- **8 direction zones on the arm stick** (on by default)
 - **Dead zone**: 0 to 40%
 - **Drive start power** and **Boom start power** (0 to 200 of 255, default
   90): the power at the smallest stick movement. Raise it if a motor only

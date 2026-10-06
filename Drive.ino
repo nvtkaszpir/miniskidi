@@ -28,6 +28,7 @@ bool settingSwapSticks = false;   // left stick drives the arm/bucket, right sti
 bool settingSwapTiltLift = false; // right stick X = boom lift, Y = bucket tilt
 bool settingInvTilt = false;
 bool settingInvLift = false;
+bool settingArmZones = true;      // arm stick snaps to 8 directions (up, up-right, right, ...)
 int settingDeadZone = 15;         // percent of the stick travel, per axis
 const int maxDeadZone = 40;
 int settingDriveMinDuty = defaultMinDuty; // start power of the track motors
@@ -90,10 +91,13 @@ void joystickInput(int turn, int drive, int tilt, int lift)
 
   if (lift != joyLift)
   {
-    // lift > 0 = arm up = ARMUP direction. No brake pulse when the arm stops (the Classic tab
-    // keeps it): with speed control it only got in the way of small, precise arm movements.
+    // lift > 0 = boom up (stick up, ISO layout). On the machines tested the arm motor's FORWARD
+    // direction (the Classic tab's ARMUP) lowers the boom, so the joystick drives it the other
+    // way. "Invert boom lift" in the app flips it for a machine wired the other way round.
+    // No brake pulse when the arm stops (the Classic tab keeps it): with speed control it only
+    // got in the way of small, precise arm movements.
     removeArmMomentum = false;
-    setMotorSpeed(ARM_MOTOR, percentToSpeed(lift));
+    setMotorSpeed(ARM_MOTOR, -percentToSpeed(lift));
     LOGD("Joystick lift %+04d", lift);
   }
 
@@ -166,11 +170,20 @@ void driveLoop()
 
 void loadSettings()
 {
-  settingsPrefs.begin("ui", true);
+  settingsPrefs.begin("ui", false);
+  // The boom direction was flipped in the firmware: the old "invLift" tick was a workaround
+  // for the old direction and would now flip it back, so it's dropped once. The setting is
+  // stored as "invBoom" from now on.
+  if (settingsPrefs.isKey("invLift"))
+  {
+    LOGI("Removing the old boom invert setting (the default boom direction changed)");
+    settingsPrefs.remove("invLift");
+  }
   settingSwapSticks = settingsPrefs.getBool("swapSticks", false);
   settingSwapTiltLift = settingsPrefs.getBool("swapTiltLift", false);
   settingInvTilt = settingsPrefs.getBool("invTilt", false);
-  settingInvLift = settingsPrefs.getBool("invLift", false);
+  settingInvLift = settingsPrefs.getBool("invBoom", false);
+  settingArmZones = settingsPrefs.getBool("armZones", true);
   settingDeadZone = constrain(settingsPrefs.getInt("deadZone", 15), 0, maxDeadZone);
   settingDriveMinDuty = constrain(settingsPrefs.getInt("driveMinDuty", defaultMinDuty), 0, maxMinDuty);
   settingArmMinDuty = constrain(settingsPrefs.getInt("armMinDuty", defaultMinDuty), 0, maxMinDuty);
@@ -205,7 +218,12 @@ void changeSetting(const std::string &name, int value)
   else if (name == "invLift")
   {
     settingInvLift = value != 0;
-    settingsPrefs.putBool("invLift", settingInvLift);
+    settingsPrefs.putBool("invBoom", settingInvLift);
+  }
+  else if (name == "armZones")
+  {
+    settingArmZones = value != 0;
+    settingsPrefs.putBool("armZones", settingArmZones);
   }
   else if (name == "deadZone")
   {
@@ -234,9 +252,9 @@ String settingsJson()
 {
   char json[200];
   snprintf(json, sizeof(json),
-           "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"deadZone\":%d,"
-           "\"driveMinDuty\":%d,\"armMinDuty\":%d}",
-           settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingDeadZone,
-           settingDriveMinDuty, settingArmMinDuty);
+           "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"armZones\":%d,"
+           "\"deadZone\":%d,\"driveMinDuty\":%d,\"armMinDuty\":%d}",
+           settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingArmZones,
+           settingDeadZone, settingDriveMinDuty, settingArmMinDuty);
   return String(json);
 }
