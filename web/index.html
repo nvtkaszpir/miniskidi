@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b1f24">
+<meta name="description" content="Bluetooth remote control for the MiniSkidi skid steer loader">
+<title>MiniSkidi</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bar-bg: #1b1f24;
+    --bar-fg: #e6e8eb;
+    --muted: #8b949e;
+    --good: #2ea043;
+    --fair: #d29922;
+    --bad: #f85149;
+    --accent: #e8590c;
+    --joy-bg: #22272e;
+    --stick-base: #2d333b;
+    --stick-ring: #444c56;
+    --stick-knob: #e8590c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bar-bg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none;
+  }
+  .noselect {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+  }
+  /* Portrait phone with the Joystick tab open: the whole app is turned sideways */
+  #app.rotated {
+    position: fixed;
+    top: 0;
+    left: 100vw;
+    width: 100vh;
+    width: 100dvh;
+    height: 100vw;
+    transform-origin: top left;
+    transform: rotate(90deg);
+  }
+
+  /* Top bar */
+  #topbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    background: var(--bar-bg);
+    color: var(--bar-fg);
+    min-height: 44px;
+    flex-wrap: wrap;
+  }
+  /* Narrow (portrait) screens: tabs get their own row */
+  @media (max-width: 520px) {
+    #tabs { width: 100%; margin-left: 0; }
+    #tabs .tab { flex: 1; }
+  }
+  #signal {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  #bars { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
+  #bars span { width: 4px; background: var(--stick-ring); border-radius: 1px; }
+  #bars span:nth-child(1) { height: 25%; }
+  #bars span:nth-child(2) { height: 50%; }
+  #bars span:nth-child(3) { height: 75%; }
+  #bars span:nth-child(4) { height: 100%; }
+  #signal.good #bars span.on { background: var(--good); }
+  #signal.fair #bars span.on { background: var(--fair); }
+  #signal.bad #bars span.on { background: var(--bad); }
+  #signal.good #signalText { color: var(--good); }
+  #signal.fair #signalText { color: var(--fair); }
+  #signal.bad #signalText, #signal.lost #signalText { color: var(--bad); font-weight: 600; }
+  #signal.off #signalText { color: var(--muted); }
+  #tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tab, .btn {
+    border: 1px solid var(--stick-ring);
+    background: transparent;
+    color: var(--bar-fg);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:disabled { opacity: 0.5; }
+
+  .panel { flex: 1; min-height: 0; overflow: auto; display: none; }
+  .panel.active { display: block; }
+  #notice {
+    display: none;
+    background: var(--bad);
+    color: #fff;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  #notice.show { display: block; }
+
+  /* Classic tab: the original MiniSkidi page */
+  #classic { background: white; text-align: center; color: black; }
+  .arrows {
+    font-size:50px;
+    color:grey;
+  }
+  td.button {
+    background-color:black;
+    border-radius:20%;
+    box-shadow: 5px 5px #888888;
+  }
+  td.button:active {
+    transform: translate(5px,5px);
+    box-shadow: none;
+  }
+  .slidecontainer {
+    width: 100%;
+  }
+  .slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 20px;
+    border-radius: 5px;
+    background: #d3d3d3;
+    outline: none;
+    opacity: 0.7;
+    -webkit-transition: .2s;
+    transition: opacity .2s;
+  }
+  .slider:hover {
+    opacity: 1;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: red;
+    cursor: pointer;
+  }
+  .slider::-moz-range-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: red;
+    cursor: pointer;
+  }
+
+  /* Joystick tab: layout of the RemoteXY "MiniSkidi" screen (200 x 80 grid) */
+  #joystick.active {
+    display: block;
+    position: relative;
+    overflow: hidden;
+    background: var(--joy-bg);
+    container-type: size;
+    touch-action: none;
+  }
+  .stick {
+    position: absolute;
+    top: 50%;
+    width: min(27.5cqw, 82cqh);
+    aspect-ratio: 1;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--stick-base) 0 60%, #262c33 100%);
+    border: 2px solid var(--stick-ring);
+    touch-action: none;
+  }
+  #stickLeft { left: max(1.5cqw, env(safe-area-inset-left)); }
+  #stickRight { right: max(1.5cqw, env(safe-area-inset-right)); }
+  .stick .knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 38%;
+    height: 38%;
+    margin: -19% 0 0 -19%;
+    border-radius: 50%;
+    background: var(--stick-knob);
+    box-shadow: 0 2px 8px rgba(0,0,0,.5);
+    pointer-events: none;
+  }
+  .stick.released .knob { transition: transform .12s ease-out; }
+  .stick .label {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -1.6em;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    pointer-events: none;
+  }
+  #attach {
+    position: absolute;
+    top: 50%;
+    /* x = 131/200 of the width, like the RemoteXY slider; height 53/80 */
+    left: 65.5cqw;
+    width: max(4.5cqw, 36px);
+    height: 66cqh;
+    transform: translateY(-50%);
+    border-radius: 10px;
+    background: var(--stick-base);
+    border: 2px solid var(--stick-ring);
+    touch-action: none;
+  }
+  #attach .fill {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    border-radius: 0 0 8px 8px;
+    background: rgba(232, 89, 12, .35);
+    pointer-events: none;
+  }
+  #attach .thumb {
+    position: absolute;
+    left: -4px; right: -4px;
+    height: 14%;
+    border-radius: 8px;
+    background: var(--stick-knob);
+    transform: translateY(50%);
+    pointer-events: none;
+  }
+  #attachLabel {
+    position: absolute;
+    left: 65.5cqw;
+    width: max(4.5cqw, 36px);
+    top: calc(50% - 33cqh - 20px);
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #joyCenter {
+    position: absolute;
+    left: 31cqw;
+    width: 30cqw;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  #lightBtn {
+    width: min(18cqw, 30cqh);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    border: 2px solid var(--stick-ring);
+    background: var(--stick-base);
+    color: var(--muted);
+    font-size: min(9cqw, 15cqh);
+    line-height: 1;
+    cursor: pointer;
+  }
+  #lightBtn.on {
+    background: #ffd43b;
+    border-color: #ffd43b;
+    color: #1b1f24;
+    box-shadow: 0 0 24px rgba(255, 212, 59, .6);
+  }
+  #joyValues {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    white-space: pre;
+  }
+
+  /* Settings tab */
+  #settings { background: var(--joy-bg); color: var(--bar-fg); }
+  .settings-wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  .settings-wrap h2 { font-size: 16px; margin: 20px 0 8px; color: var(--muted); font-weight: 600; }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--stick-base);
+  }
+  .row label { flex: 1; }
+  .row small { display: block; color: var(--muted); }
+  .row input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); }
+  .row input[type=range] { width: 45%; accent-color: var(--accent); }
+  table.info { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.info td { padding: 6px 0; border-bottom: 1px solid var(--stick-base); vertical-align: top; }
+  table.info td:first-child { color: var(--muted); width: 40%; padding-right: 8px; }
+  table.info td:last-child { overflow-wrap: anywhere; }
+</style>
+</head>
+<body class="noselect">
+<div id="app">
+  <div id="topbar">
+    <div id="signal" class="off" title="Bluetooth signal strength at the MiniSkidi">
+      <div id="bars"><span></span><span></span><span></span><span></span></div>
+      <span id="signalText">Not connected</span>
+    </div>
+    <button id="connectBtn" class="btn primary">Connect</button>
+    <nav id="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="classic" aria-selected="true">Classic</button>
+      <button class="tab" role="tab" data-tab="joystick" aria-selected="false">Joystick</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </div>
+  <div id="notice"></div>
+
+  <!-- Classic tab: the original MiniSkidi web page -->
+  <section id="classic" class="panel active">
+    <div class="slidecontainer">
+      <label for="powerSwitch" style="font-size: 20px;">HorizontalScreen:</label>
+      <input type="checkbox" id="powerSwitch" class="power-switch" onchange='sendButtonInput("Switch", 0)'>
+    </div>
+    <h1 style="color: black;text-align:center;">MINISKIDI</h1>
+
+    <table id="mainTable" style="width:min(400px,100%);margin:auto;table-layout:fixed" CELLSPACING=10>
+      <tr>
+        <td></td>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","1")'onmousedown='sendButtonInput("MoveCar","1")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8679;</span></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","3")'onmousedown='sendButtonInput("MoveCar","3")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8678;</span></td>
+        <td class="button"></td>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","4")'onmousedown='sendButtonInput("MoveCar","4")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8680;</span></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","2")'onmousedown='sendButtonInput("MoveCar","2")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8681;</span></td>
+        <td></td>
+      </tr>
+      <tr/>
+      <tr/>
+      <tr/><tr/>
+      <tr>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","6")'onmousedown='sendButtonInput("MoveCar","6")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8678;</span></td>
+        <td class="button" ontouchstart='sendButtonInput("Light","6")'onmousedown='sendButtonInput("Light","6")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#9788;</span></td>
+        <td class="button" ontouchstart='sendButtonInput("MoveCar","5")'onmousedown='sendButtonInput("MoveCar","5")'onmouseup='sendButtonInput("MoveCar","0")' ontouchend='sendButtonInput("MoveCar","0")'><span class="arrows" >&#8680;</span></td>
+      </tr>
+      <tr/>
+      <tr/>
+      <tr/><tr/>
+      <tr>
+        <td style="text-align:left;font-size:25px"><b>Bucket:</b></td>
+        <td colspan=2>
+         <div class="slidecontainer">
+            <input type="range" min="10" max="180" value="90" class="slider" id="Bucket" oninput='sendButtonInput("Bucket",value)'>
+          </div>
+        </td>
+      </tr>
+      <tr/>
+      <tr/>
+      <tr/><tr/>
+      <tr>
+        <td style="text-align:left;font-size:25px"><b>AUX:</b></td>
+        <td colspan=2>
+         <div class="slidecontainer">
+            <input type="range" min="10" max="180" value="90" class="slider" id="AUX" oninput='sendButtonInput("AUX",value)'>
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <footer id="deviceInfo" style="margin:30px 0;font-size:14px;color:grey;white-space:pre-line">Not connected</footer>
+  </section>
+
+  <!-- Joystick tab -->
+  <section id="joystick" class="panel">
+    <div id="stickLeft" class="stick released"><div class="knob"></div><div class="label"></div></div>
+    <div id="joyCenter">
+      <button id="lightBtn" title="Lights on/off">&#9788;</button>
+      <div id="joyValues"></div>
+      <button id="fullscreenBtn" class="btn">Fullscreen</button>
+    </div>
+    <div id="attach" title="Attachment"><div class="fill"></div><div class="thumb"></div></div>
+    <div id="attachLabel">Attach</div>
+    <div id="stickRight" class="stick released"><div class="knob"></div><div class="label"></div></div>
+  </section>
+
+  <!-- Settings tab -->
+  <section id="settings" class="panel">
+    <div class="settings-wrap">
+      <h2>Joysticks</h2>
+      <div class="row">
+        <label for="setSwapSticks">Swap joysticks<small>Left stick: bucket and boom. Right stick: driving.</small></label>
+        <input type="checkbox" id="setSwapSticks" data-setting="swapSticks">
+      </div>
+      <div class="row">
+        <label for="setSwapTiltLift">Swap bucket tilt and boom lift<small>Horizontal: boom lift. Vertical: bucket tilt.</small></label>
+        <input type="checkbox" id="setSwapTiltLift" data-setting="swapTiltLift">
+      </div>
+      <div class="row">
+        <label for="setInvTilt">Invert bucket tilt</label>
+        <input type="checkbox" id="setInvTilt" data-setting="invTilt">
+      </div>
+      <div class="row">
+        <label for="setInvLift">Invert boom lift</label>
+        <input type="checkbox" id="setInvLift" data-setting="invLift">
+      </div>
+      <div class="row">
+        <label for="setDeadZone">Dead zone: <span id="deadZoneValue">15</span>%<small>Small stick movements near the center are ignored.</small></label>
+        <input type="range" id="setDeadZone" min="0" max="40" step="1" value="15">
+      </div>
+      <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
+
+      <h2>Device</h2>
+      <table class="info"><tbody id="infoTable"><tr><td>Status</td><td>Not connected</td></tr></tbody></table>
+
+      <h2>Pairing</h2>
+      <div class="row">
+        <label>Forget paired phones<small>Every phone, this one too, has to pair again with the passkey. On this phone, also tap "Forget" on the MiniSkidi in Android's Bluetooth settings.</small></label>
+        <button id="forgetBtn" class="btn">Forget</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+// Keep in sync with Ble.ino
+const SERVICE_UUID = "d0280000-59cd-41da-9d1e-e7992ddd2cb1";
+const CMD_UUID     = "d0280001-59cd-41da-9d1e-e7992ddd2cb1";
+const STATUS_UUID  = "d0280002-59cd-41da-9d1e-e7992ddd2cb1";
+const INFO_UUID    = "d0280003-59cd-41da-9d1e-e7992ddd2cb1";
+
+const PING_INTERVAL_MS = 150;   // keep-alive for the MiniSkidi's 500 ms watchdog
+const JOY_REPEAT_MS = 100;      // stick frames are repeated this often while a stick is moved
+const STATUS_TIMEOUT_MS = 1000; // no status notification for this long = "No signal"
+// Signal colors (dBm): green from RSSI_GOOD, amber from RSSI_FAIR, red below (too weak)
+const RSSI_GOOD = -67;
+const RSSI_FAIR = -75;
+
+const $ = (id) => document.getElementById(id);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// ---------------------------------------------------------------- Bluetooth connection
+
+let device = null;
+let cmdChar = null;
+let statusChar = null;
+let infoChar = null;
+let connected = false;
+let userDisconnect = false;
+let everConnected = false; // auto-reconnect only after a connection worked (not after a failed pairing)
+let reconnectDelay = 1000;
+let lastStatusTime = 0;
+let lastStatus = null;
+let lastSentTime = 0;
+
+function showNotice(text) {
+  $("notice").textContent = text;
+  $("notice").classList.toggle("show", !!text);
+}
+
+async function connectClicked() {
+  if (connected || (device && device.gatt.connected)) {
+    userDisconnect = true;
+    stopAll();
+    // Let the stop frames go out before the link closes
+    setTimeout(() => device && device.gatt.disconnect(), 150);
+    return;
+  }
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+  } catch (err) {
+    if (err.name !== "NotFoundError") showNotice("Bluetooth: " + err.message);
+    return; // NotFoundError = the picker was cancelled
+  }
+  device.addEventListener("gattserverdisconnected", onDisconnected);
+  userDisconnect = false;
+  everConnected = false;
+  await connectGatt();
+}
+
+async function connectGatt() {
+  $("connectBtn").textContent = "Connecting…";
+  $("connectBtn").disabled = true;
+  try {
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    cmdChar = await service.getCharacteristic(CMD_UUID);
+    statusChar = await service.getCharacteristic(STATUS_UUID);
+    infoChar = await service.getCharacteristic(INFO_UUID);
+    // The first access to a protected characteristic starts pairing: Android asks for the passkey
+    await readInfo();
+    statusChar.addEventListener("characteristicvaluechanged", onStatus);
+    await statusChar.startNotifications();
+    connected = true;
+    everConnected = true;
+    reconnectDelay = 1000;
+    writeQueue.length = 0;
+    showNotice("");
+  } catch (err) {
+    connected = false;
+    showNotice("Connection failed: " + err.message);
+    if (device.gatt.connected) device.gatt.disconnect();
+    else scheduleReconnect();
+  }
+  updateConnectButton();
+}
+
+function onDisconnected() {
+  connected = false;
+  cmdChar = statusChar = infoChar = null;
+  writeQueue.length = 0;
+  writing = false;
+  releaseSticks();
+  updateConnectButton();
+  updateSignal();
+  $("deviceInfo").textContent = "Not connected";
+  if (!userDisconnect) scheduleReconnect();
+}
+
+// Reconnect to the same MiniSkidi without the device picker (only works while the page is open)
+function scheduleReconnect() {
+  if (userDisconnect || !device || !everConnected) return;
+  showNotice("Connection lost, reconnecting…");
+  setTimeout(() => {
+    if (!userDisconnect && device && !device.gatt.connected && document.visibilityState === "visible") {
+      connectGatt();
+    } else if (!userDisconnect && device && !device.gatt.connected) {
+      scheduleReconnect();
+    }
+  }, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+}
+
+function updateConnectButton() {
+  const btn = $("connectBtn");
+  btn.disabled = false;
+  btn.textContent = connected ? "Disconnect" : "Connect";
+  btn.classList.toggle("primary", !connected);
+}
+
+// Web Bluetooth allows only one write at a time, so writes go through a queue. A newer frame
+// with the same key (Joy, Attach, Bucket, AUX, Ping) replaces an older one that hasn't gone out yet.
+const writeQueue = [];
+let writing = false;
+
+function send(text, replaceKey) {
+  if (!connected || !cmdChar) return;
+  if (replaceKey) {
+    const i = writeQueue.findIndex((item) => item.key === replaceKey);
+    if (i >= 0) {
+      writeQueue[i].text = text;
+      return;
+    }
+  }
+  writeQueue.push({ text: text, key: replaceKey });
+  lastSentTime = performance.now();
+  pumpWrites();
+}
+
+async function pumpWrites() {
+  if (writing) return;
+  writing = true;
+  while (writeQueue.length && cmdChar) {
+    const item = writeQueue.shift();
+    try {
+      const data = encoder.encode(item.text);
+      // Frequent frames without response (faster); one-off commands with response (confirmed)
+      if (item.key === "Joy" || item.key === "Ping") await cmdChar.writeValueWithoutResponse(data);
+      else await cmdChar.writeValueWithResponse(data);
+    } catch (err) {
+      console.warn("write failed", item.text, err);
+    }
+  }
+  writing = false;
+}
+
+// Classic tab: same name and arguments as in the original page
+function sendButtonInput(key, value) {
+  const replaceable = key === "Bucket" || key === "AUX";
+  send(key + "," + value, replaceable ? key : null);
+}
+
+function onStatus(event) {
+  try {
+    lastStatus = JSON.parse(decoder.decode(event.target.value));
+  } catch (err) {
+    return;
+  }
+  lastStatusTime = performance.now();
+  updateSignal();
+  $("lightBtn").classList.toggle("on", !!lastStatus.light);
+  if (!attachSlider.dragging) attachSlider.set(Math.round((lastStatus.aux - 10) * 100 / 170));
+}
+
+async function readInfo() {
+  if (!infoChar) return;
+  const info = JSON.parse(decoder.decode(await infoChar.readValue()));
+  applySettings(info.settings);
+  const rows = [
+    ["Name", info.name],
+    ["Bluetooth address", info.mac],
+    ["Firmware", info.firmware],
+    ["Uptime", formatUptime(info.uptime)],
+    ["Chip", info.chip],
+    ["Free memory", Math.round(info.heap / 1024) + " KB (lowest " + Math.round(info.minHeap / 1024) + " KB)"],
+    ["Connection", "interval " + info.interval + " ms, timeout " + info.timeout + " ms, MTU " + info.mtu],
+    ["Paired phones", info.bonds],
+  ];
+  const table = $("infoTable");
+  table.replaceChildren();
+  for (const [name, value] of rows) {
+    const tr = table.insertRow();
+    tr.insertCell().textContent = name;
+    tr.insertCell().textContent = value;
+  }
+  $("deviceInfo").textContent = "Name: " + info.name + "\nBluetooth: " + info.mac;
+}
+
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;
+  return (h ? h + " h " : "") + (h || m ? m + " min " : "") + s + " s";
+}
+
+// ---------------------------------------------------------------- Signal indicator
+
+function updateSignal() {
+  const el = $("signal");
+  const text = $("signalText");
+  const bars = el.querySelectorAll("#bars span");
+  let state, level = 0;
+  if (!connected) {
+    state = "off";
+    text.textContent = device && !userDisconnect ? "Reconnecting…" : "Not connected";
+  } else if (!lastStatus || performance.now() - lastStatusTime > STATUS_TIMEOUT_MS) {
+    state = "lost";
+    text.textContent = "No signal";
+  } else if (!lastStatus.rssi) {
+    state = "fair";
+    text.textContent = "Connected";
+    level = 2;
+  } else {
+    const rssi = lastStatus.rssi;
+    state = rssi >= RSSI_GOOD ? "good" : rssi >= RSSI_FAIR ? "fair" : "bad";
+    level = rssi >= -55 ? 4 : rssi >= RSSI_GOOD ? 3 : rssi >= RSSI_FAIR ? 2 : 1;
+    text.textContent = rssi + " dBm" + (state === "bad" ? " weak" : "");
+  }
+  el.className = state;
+  bars.forEach((bar, i) => bar.classList.toggle("on", i < level));
+}
+
+// ---------------------------------------------------------------- Tabs and orientation
+
+let activeTab = "classic";
+
+function selectTab(name) {
+  activeTab = name;
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.tab === name));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === name));
+  if (name !== "joystick") releaseSticks();
+  if (name === "joystick") goLandscape();
+  if (name === "settings") readInfo().catch(() => {});
+  updateRotation();
+}
+
+// Android: landscape needs fullscreen first. Fails silently where it isn't supported.
+async function goLandscape() {
+  try {
+    if (!document.fullscreenElement && !matchMedia("(display-mode: fullscreen)").matches) {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+    }
+    await screen.orientation.lock("landscape");
+  } catch (err) {
+    // Not supported or not allowed: the CSS rotation below takes over
+  }
+  updateRotation();
+}
+
+// Still portrait with the Joystick tab open: turn the app sideways with CSS
+let rotated = false;
+function updateRotation() {
+  rotated = activeTab === "joystick" && window.innerHeight > window.innerWidth;
+  $("app").classList.toggle("rotated", rotated);
+}
+
+// Pointer position relative to an element's center, in the element's own (unrotated) axes
+function localOffset(event, el) {
+  const r = el.getBoundingClientRect();
+  const sx = event.clientX - (r.left + r.width / 2);
+  const sy = event.clientY - (r.top + r.height / 2);
+  // #app is rotated 90° clockwise: the element's x axis points down the screen
+  return rotated ? { x: sy, y: -sx, w: r.height, h: r.width } : { x: sx, y: sy, w: r.width, h: r.height };
+}
+
+// ---------------------------------------------------------------- Joysticks
+
+const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15 };
+
+// A stick follows one finger (pointer). Output x, y: -1..1, y up positive, dead zone applied.
+class Stick {
+  constructor(el) {
+    this.el = el;
+    this.knob = el.querySelector(".knob");
+    this.pointerId = null;
+    this.x = 0;
+    this.y = 0;
+    el.addEventListener("pointerdown", (e) => this.down(e));
+    el.addEventListener("pointermove", (e) => this.move(e));
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      el.addEventListener(type, (e) => this.up(e));
+    }
+  }
+  down(e) {
+    if (this.pointerId !== null) return;
+    e.preventDefault();
+    this.pointerId = e.pointerId;
+    this.el.setPointerCapture(e.pointerId);
+    this.el.classList.remove("released");
+    this.move(e);
+  }
+  move(e) {
+    if (e.pointerId !== this.pointerId) return;
+    e.preventDefault();
+    const o = localOffset(e, this.el);
+    const radius = o.w / 2 * 0.62; // knob travel, keeps the knob inside the base
+    let nx = o.x / radius, ny = -o.y / radius;
+    const mag = Math.hypot(nx, ny);
+    if (mag > 1) { nx /= mag; ny /= mag; }
+    this.knob.style.transform = "translate(" + (nx * radius) + "px," + (-ny * radius) + "px)";
+    // Radial dead zone, rescaled so the output starts at 0 at its edge
+    const dz = settings.deadZone / 100;
+    const m = Math.min(mag, 1);
+    const scale = m <= dz ? 0 : (m - dz) / (1 - dz) / m;
+    this.x = nx * scale;
+    this.y = ny * scale;
+    joystickChanged();
+  }
+  up(e) {
+    if (e.pointerId !== this.pointerId) return;
+    this.release();
+  }
+  release() {
+    this.pointerId = null;
+    this.x = this.y = 0;
+    this.el.classList.add("released");
+    this.knob.style.transform = "";
+    joystickChanged();
+  }
+  setLabel(text) {
+    this.el.querySelector(".label").textContent = text;
+  }
+}
+
+// Vertical slider 0..100 (bottom = 0), stays where it is let go: the attachment servo
+class VSlider {
+  constructor(el, onChange) {
+    this.el = el;
+    this.onChange = onChange;
+    this.value = 0;
+    this.dragging = false;
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      this.dragging = true;
+      el.setPointerCapture(e.pointerId);
+      this.fromPointer(e);
+    });
+    el.addEventListener("pointermove", (e) => { if (this.dragging) this.fromPointer(e); });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      el.addEventListener(type, () => { this.dragging = false; });
+    }
+    this.set(0);
+  }
+  fromPointer(e) {
+    const o = localOffset(e, this.el);
+    const v = Math.round(Math.max(0, Math.min(100, 50 - o.y / o.h * 100)));
+    if (v !== this.value) {
+      this.set(v);
+      this.onChange(v);
+    }
+  }
+  set(v) {
+    this.value = Math.max(0, Math.min(100, v));
+    this.el.querySelector(".thumb").style.bottom = this.value * 0.86 + "%";
+    this.el.querySelector(".fill").style.height = this.value + "%";
+  }
+}
+
+const stickLeft = new Stick($("stickLeft"));
+const stickRight = new Stick($("stickRight"));
+const attachSlider = new VSlider($("attach"), (v) => send("Attach," + v, "Attach"));
+
+let lastJoyFrame = "Joy,0,0,0,0";
+let lastJoyTime = 0;
+
+// Sticks -> turn, drive, tilt, lift (-100..100) with the Settings tab options applied
+function joystickValues() {
+  const drive = settings.swapSticks ? stickRight : stickLeft;
+  const arm = settings.swapSticks ? stickLeft : stickRight;
+  let tilt = settings.swapTiltLift ? arm.y : arm.x;
+  let lift = settings.swapTiltLift ? arm.x : arm.y;
+  if (settings.invTilt) tilt = -tilt;
+  if (settings.invLift) lift = -lift;
+  const pct = (v) => Math.round(v * 100) + 0; // + 0 turns -0 into 0
+  return { turn: pct(drive.x), drive: pct(drive.y), tilt: pct(tilt), lift: pct(lift) };
+}
+
+function joystickChanged() {
+  const v = joystickValues();
+  const frame = "Joy," + v.turn + "," + v.drive + "," + v.tilt + "," + v.lift;
+  $("joyValues").textContent = "turn " + v.turn + "  drive " + v.drive + "\ntilt " + v.tilt + "  lift " + v.lift;
+  if (frame !== lastJoyFrame) {
+    lastJoyFrame = frame;
+    lastJoyTime = performance.now();
+    send(frame, "Joy");
+  }
+}
+
+function updateStickLabels() {
+  const armLabel = settings.swapTiltLift ? "↔ lift  ↕ tilt" : "↔ tilt  ↕ lift";
+  const driveLabel = "↔ turn  ↕ drive";
+  stickLeft.setLabel(settings.swapSticks ? armLabel : driveLabel);
+  stickRight.setLabel(settings.swapSticks ? driveLabel : armLabel);
+}
+
+function releaseSticks() {
+  if (stickLeft.pointerId !== null) stickLeft.release();
+  if (stickRight.pointerId !== null) stickRight.release();
+}
+
+// Safety: stop everything (sticks to center and an explicit stop of all motors)
+function stopAll() {
+  releaseSticks();
+  lastJoyFrame = "Joy,0,0,0,0";
+  send(lastJoyFrame, "Joy");
+  send("MoveCar,0");
+}
+
+// Repeats the stick frame while a stick is held and sends the watchdog keep-alive
+setInterval(() => {
+  const now = performance.now();
+  if (lastJoyFrame !== "Joy,0,0,0,0" && now - lastJoyTime >= JOY_REPEAT_MS) {
+    lastJoyTime = now;
+    send(lastJoyFrame, "Joy");
+  } else if (now - lastSentTime >= PING_INTERVAL_MS) {
+    send("Ping", "Ping");
+  }
+  updateSignal();
+}, 50);
+
+$("lightBtn").addEventListener("click", () => send("Light,0"));
+$("fullscreenBtn").addEventListener("click", goLandscape);
+
+// ---------------------------------------------------------------- Settings tab
+
+function applySettings(s) {
+  if (!s) return;
+  settings.swapSticks = !!s.swapSticks;
+  settings.swapTiltLift = !!s.swapTiltLift;
+  settings.invTilt = !!s.invTilt;
+  settings.invLift = !!s.invLift;
+  settings.deadZone = s.deadZone;
+  document.querySelectorAll("[data-setting]").forEach((box) => { box.checked = settings[box.dataset.setting]; });
+  $("setDeadZone").value = settings.deadZone;
+  $("deadZoneValue").textContent = settings.deadZone;
+  updateStickLabels();
+}
+
+document.querySelectorAll("[data-setting]").forEach((box) => {
+  box.addEventListener("change", () => {
+    settings[box.dataset.setting] = box.checked;
+    send("Set," + box.dataset.setting + "," + (box.checked ? 1 : 0));
+    updateStickLabels();
+  });
+});
+$("setDeadZone").addEventListener("input", (e) => {
+  settings.deadZone = parseInt(e.target.value, 10);
+  $("deadZoneValue").textContent = settings.deadZone;
+});
+$("setDeadZone").addEventListener("change", (e) => send("Set,deadZone," + e.target.value));
+$("forgetBtn").addEventListener("click", () => {
+  if (confirm("Forget all paired phones? Every phone has to pair again with the passkey.")) {
+    send("Set,forgetBonds,1");
+  }
+});
+
+// ---------------------------------------------------------------- Classic tab keyboard
+
+const auxSlider = document.getElementById('AUX');
+const bucketSlider = document.getElementById('Bucket');
+
+function handleKeyDown(event) {
+  if (activeTab !== "classic") return;
+  if (event.keyCode === 38) {
+    sendButtonInput("MoveCar", "1");
+  }
+  if (event.keyCode === 40)
+  {
+    sendButtonInput("MoveCar", "2");
+  }
+  if (event.keyCode ===37)
+  {
+    sendButtonInput("MoveCar", "3");
+  }
+  if (event.keyCode ===39)
+  {
+    sendButtonInput("MoveCar", "4");
+  }
+  if (event.keyCode === 87)
+  {
+    sendButtonInput("MoveCar", "5");
+  }
+  if (event.keyCode === 83)
+  {
+    sendButtonInput("MoveCar", "6");
+  }
+  if(event.keyCode === 69)
+  {
+    auxSlider.value = parseInt(auxSlider.value) + 5;
+    sendButtonInput("AUX",auxSlider.value);
+  }
+  if(event.keyCode === 68)
+  {
+    auxSlider.value = parseInt(auxSlider.value) - 5;
+    sendButtonInput("AUX",auxSlider.value);
+  }
+  if(event.keyCode === 81)
+  {
+    bucketSlider.value = parseInt(bucketSlider.value) + 5;
+    sendButtonInput("Bucket",bucketSlider.value);
+  }
+  if(event.keyCode === 65)
+  {
+    bucketSlider.value = parseInt(bucketSlider.value) - 5;
+    sendButtonInput("Bucket",bucketSlider.value);
+  }
+}
+function handleKeyUp(event) {
+  if (activeTab !== "classic") return;
+  if (event.keyCode === 37 || event.keyCode === 38 || event.keyCode === 39 || event.keyCode === 40 || event.keyCode === 87 || event.keyCode === 83) {
+    sendButtonInput("MoveCar", "0");
+  }
+}
+document.addEventListener('keydown', handleKeyDown);
+document.addEventListener('keyup', handleKeyUp);
+document.getElementById("mainTable").addEventListener("touchend", function(event){
+  event.preventDefault()
+});
+
+// ---------------------------------------------------------------- Start
+
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => selectTab(t.dataset.tab)));
+$("connectBtn").addEventListener("click", connectClicked);
+window.addEventListener("resize", updateRotation);
+// Safety: the page going to the background (screen off, app switch) stops the machine
+document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible") stopAll(); });
+window.addEventListener("pagehide", stopAll);
+window.addEventListener("blur", releaseSticks);
+// Long-press menus and pinch zoom would steal touches from the controls
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+updateStickLabels();
+updateSignal();
+
+if (!navigator.bluetooth) {
+  showNotice("This browser has no Web Bluetooth. Open this page in Chrome on Android" +
+             (window.isSecureContext ? "." : " over https:// (or http://localhost)."));
+  $("connectBtn").disabled = true;
+}
+
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch((err) => console.warn("service worker", err));
+}
+</script>
+</body>
+</html>

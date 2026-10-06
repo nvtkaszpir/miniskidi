@@ -1,5 +1,7 @@
 # MiniSkidi 3.0
 
+All the code is written by Claude Opus 5.5 with a human in the loop.
+
 Firmware for the MiniSkidi skid steer loader, running on an ESP32-WROOM-32D
 ("ESP32 Dev Module").
 
@@ -58,10 +60,11 @@ The Arduino IDE does not install the versions pinned in `sketch.yaml`, so instal
 
 1. **File > Preferences > Additional boards manager URLs**: add
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
-2. **Tools > Board > Boards Manager**: search for `esp32` by Espressif Systems and install version **2.0.17**.
+2. **Tools > Board > Boards Manager**: search for `esp32` by Espressif Systems
+   and install version **2.0.17**.
 3. **Sketch > Include Library > Manage Libraries**: install these versions:
    - `ESP32Servo` by Kevin Harrington: **3.2.1**
-   - `RemoteXY` by RemoteXY: **4.1.10**
+   - `NimBLE-Arduino` by h2zero: **2.5.1**
 
    On Linux the IDE also runs `esptool.py` with the first `python` on
    `PATH`, so that Python needs `pyserial`
@@ -86,147 +89,177 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --dump-profile
 
 Copy the printed profile into `sketch.yaml`.
 
+## How it works
+
+The MiniSkidi is controlled over **Bluetooth Low Energy (BLE)** only, from a
+web app running in **Chrome on Android**. The ESP32 has no Wi-Fi in this
+setup.
+
+- The ESP32 runs a BLE server ([Ble.ino](Ble.ino), using
+  [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino), Apache-2.0).
+- The phone app is a plain web page in [web/](web/). It uses the browser's
+  [Web Bluetooth](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API)
+  API, so there is nothing to install from an app store. It is free and
+  open source, with no account or cloud service.
+- Web Bluetooth only works on `https://` pages, so the app is hosted on
+  GitHub Pages (free). After the first visit it also works offline, and it
+  can be installed to the home screen like an app.
+
+iPhones are not supported: Safari and the other iOS browsers have no Web
+Bluetooth.
+
+## Publishing the app (one time)
+
+1. Create a **public** repository on GitHub and push this project to it
+   (branch `main` or `master`).
+2. In the repository, open **Settings > Pages** and set **Source** to
+   **GitHub Actions**.
+3. The workflow in [.github/workflows/pages.yml](.github/workflows/pages.yml)
+   publishes the `web/` folder on every push that changes it. The address
+   is shown in the workflow run and on the Pages settings page, for example
+   `https://<your-user>.github.io/<repository>/`.
+
+After changing files in `web/`, raise `CACHE` in [web/sw.js](web/sw.js)
+(for example `miniskidi-v2`), so installed apps load the new version.
+
 ## Connecting
 
-`XXXXXX` below is the end of the ESP32 MAC address. The serial monitor
-prints the exact network name and hostname at startup.
+1. Change the passkey before the first upload: `blePasskey` in
+   [MiniSkidi_3_0.ino](MiniSkidi_3_0.ino) (6 digits, default `123456`).
+2. Power on the MiniSkidi. The serial monitor shows its Bluetooth name,
+   `MiniSkidi-XXXXXX`, where `XXXXXX` is the end of the ESP32 MAC address.
+3. On the phone, turn on Bluetooth (on Android 11 and older, also Location),
+   open the app address in **Chrome**, and tap **Connect**.
+4. Pick `MiniSkidi-XXXXXX` in the list.
+5. The first time, Android asks to pair: enter the passkey. The phone stays
+   paired after that and connects without the passkey.
+6. Optional: Chrome menu ⋮ > **Add to Home screen** / **Install app**. The
+   installed app opens fullscreen and works without internet.
 
-### Access point mode (default)
+Only one phone can be connected at a time. After a connection is lost, the
+app reconnects by itself while the page is open. After the page is
+reloaded, tap **Connect** again.
 
-The MiniSkidi creates its own Wi-Fi network.
+### Changing the passkey or removing phones
 
-1. Connect your phone to the Wi-Fi network `ProfBoots MiniSkidi OG-XXXXXX`
-   (password: `deadbeef`).
-2. Open the sign-in page the device offers: Android shows a **"Sign in to
-   Wi-Fi network"** notification, iPhones/iPads/Macs open a sign-in window,
-   Windows shows "Action needed", and Firefox and Linux desktops show a
-   login banner. The control page opens over Wi-Fi even when mobile data is
-   on. The list of supported checks is in `CaptivePortalDns.ino`.
-3. If the notification does not appear, or the sign-in page only shows a
-   certificate error, tap ⋮ > **Use this network as is** (or turn off mobile
-   data), then open `https://192.168.4.1` or `https://miniskidi.local` in
-   Chrome.
+The MiniSkidi remembers up to 3 paired phones. To make every phone pair
+again (for example after changing `blePasskey`):
 
-### Client mode
+1. In the app, **Settings > Forget paired phones** (or erase the flash with
+   `esptool.py erase_flash`).
+2. On each phone, open Android **Settings > Bluetooth**, tap the MiniSkidi,
+   and choose **Forget**.
 
-The MiniSkidi joins an existing Wi-Fi network, for example your home router.
+## Using the app
 
-1. In `MiniSkidi_3_0.ino`, set `staSsid` and `staPassphrase` to the network's
-   name and password, then upload.
-2. Open `https://miniskidi-xxxxxx.local` (lowercase) from a device on the
-   same network, or use the IP address printed in the serial monitor.
+The top bar is the same on every tab:
 
-If the MiniSkidi cannot connect within 15 seconds, it falls back to access
-point mode.
+- **Signal strength**: how well the MiniSkidi receives the phone, in dBm.
+  - green: -67 dBm or better
+  - amber: -68 to -75 dBm
+  - red with **weak**: below -75 dBm, close to losing the connection
+  - red **No signal**: no status from the MiniSkidi for 1 second
+- **Connect / Disconnect**
+- the tabs: **Classic**, **Joystick**, **Settings**
 
-### Login
+### Classic tab
 
-The control page asks for a user name and password:
+The original MiniSkidi page: arrow buttons for driving and the arm, light
+button, and Bucket and AUX sliders. The keyboard shortcuts still work with
+a keyboard attached: arrows drive, W/S arm, Q/A bucket, E/D AUX. The motors
+run at full speed while a button is held.
 
-- user: `mini`
-- password: `skidi`
+### Joystick tab
 
-Change them with `webUser` and `webPassword` in `MiniSkidi_3_0.ino`. The
-browser remembers the login until it is closed. The login is sent over
-HTTPS, so it is encrypted.
+Landscape layout, the same as the former RemoteXY screen:
 
-### RemoteXY app
+| Control                    | Left / right            | Up / down          |
+|----------------------------|-------------------------|--------------------|
+| Left joystick              | turn left / right       | forward / backward |
+| Right joystick             | bucket tilt             | boom lift up / down |
+| Vertical slider ("Attach") | attachment (AUX) servo, bottom 0 to top 100 | |
+| ☼ button                   | lights on / off         |                    |
 
-Besides the web page, the MiniSkidi can be driven with the
-[RemoteXY](https://remotexy.com/en/download/) app for Android and iOS. It
-connects over the same Wi-Fi (access point or client mode). The web page and
-the app can be used at the same time.
+- Both joysticks can be used at the same time with two thumbs.
+- Speed follows how far a stick is pushed. Pushing the drive stick
+  diagonally makes curves; sideways only turns on the spot.
+- Lifting a thumb puts that stick back in the center and stops what it
+  controlled.
+- The bucket tilt sets a speed, not a position: the bucket keeps tilting
+  while the stick is pushed and stays where it is when the stick is let go.
+  It moves between 10° and 180°, the same range as the Classic slider.
+- Small movements near the center (the dead zone, 15% by default) are
+  ignored, so a resting thumb doesn't move the machine.
+- The tab switches to fullscreen landscape where Android allows it. If the
+  phone stays in portrait (for example with rotation lock on), the screen
+  is turned sideways; hold the phone in landscape.
 
-#### One-time setup: the control layout
+### Settings tab
 
-The layout of the app's controls comes from the remotexy.com editor and is
-compiled into the firmware. Until you add one, the app part is off and the
-serial monitor shows `RemoteXY app control is off`.
+- **Swap joysticks**: driving on the right stick, bucket and boom on the left
+- **Swap bucket tilt and boom lift**: boom on horizontal, bucket on vertical
+- **Invert bucket tilt**, **Invert boom lift**
+- **Dead zone**: 0 to 40%
+- **Device**: name, Bluetooth address, firmware build date, uptime, chip,
+  free memory, connection details, number of paired phones
+- **Forget paired phones**
 
-1. Open the [editor](https://remotexy.com/en/editor/), pick any WiFi
-   connection and the ESP32 board (the sketch uses only the layout, not these
-   settings).
-2. Add these elements and set each one's **Variable name** exactly as shown.
-   Position and order are up to you:
+Settings are saved on the MiniSkidi, so they survive a restart and are the
+same for every phone.
 
-   | Element  | Variable name | Controls                      |
-   |----------|---------------|-------------------------------|
-   | Joystick | `joystick`    | driving                       |
-   | Button   | `arm_up`      | arm up while held             |
-   | Button   | `arm_down`    | arm down while held           |
-   | Switch   | `light`       | lights                        |
-   | Slider   | `bucket`      | bucket tilt (range 0 to 100)  |
-   | Slider   | `aux`         | AUX servo (range 0 to 100)    |
+## Safety
 
-3. Click **Get source code**. Copy the `RemoteXY_CONF_PROGMEM` array and the
-   `struct { ... } RemoteXY;` below it, and replace everything after
-   `#pragma once` in [RemoteXYLayout.h](RemoteXYLayout.h) with them. This
-   also removes the `REMOTEXY_LAYOUT_PLACEHOLDER` line.
-4. Build and upload.
+The motors stop when the connection to the phone is lost:
 
-#### Connecting the app
+- **Watchdog**: the app sends a message at least every 150 ms. If nothing
+  arrives for **500 ms** while anything moves, the MiniSkidi stops all
+  motors and the bucket.
+- **Bluetooth link loss**: the MiniSkidi asks the phone for a 400 ms
+  supervision timeout; after that long without contact the connection is
+  dropped and the motors stop. Phones may choose a longer timeout, so the
+  watchdog above is the real limit.
+- **App in the background**: switching apps, locking the screen or closing
+  the page stops everything.
+- **Disconnect** stops everything before the connection closes.
 
-In the app, add a new WiFi device by IP address (not a cloud device) and
-enter:
+The serial monitor logs why the motors were stopped.
 
-- address: `192.168.4.1` in access point mode, or the IP address printed in
-  the serial monitor in client mode,
-- port: `6377`,
-- password: `skidi`.
+## Tuning
 
-Change the port and password with `remoteXYPort` and `remoteXYPassword` in
-`MiniSkidi_3_0.ino`.
+Constants at the top of [Drive.ino](Drive.ino):
 
-The joystick drives forward, backward or turns in place. The motors are only
-on or off, so a small movement does the same as a full one. The center 30% of
-the joystick range is a dead zone.
+- `motorMinDuty` (default 90 of 255): the lowest power a motor gets once
+  a stick leaves the dead zone. Raise it if the machine only hums and
+  doesn't move at small stick movements; lower it for finer slow driving.
+- `motorPwmFreq` (default 1000 Hz): PWM frequency of the motor outputs.
+- `bucketMaxRate` (default 90°/s): bucket tilt speed at full deflection.
+- `watchdogTimeoutMs` (default 500 ms): see [Safety](#safety).
 
-When the app disconnects, the motors stop. If the app is closed, they stop at
-once. If the phone goes out of Wi-Fi range, they stop after up to **8
-seconds**, the RemoteXY library's timeout.
+## Testing the app without GitHub
 
-Unlike the web page, the RemoteXY connection is **not encrypted**. Anyone on
-the same Wi-Fi network can read the password and the commands.
+Web Bluetooth also works on `http://localhost`:
 
-### HTTPS and the certificate warning
-
-The control page is served over HTTPS. Plain `http://` addresses redirect to
-`https://`.
-
-The ESP32 creates its own self-signed certificate on first boot and keeps it
-in flash, so each MiniSkidi has its own private key. Browsers do not know
-who issued it, so the first visit shows a warning such as "Your connection
-is not private":
-
-- Chrome: **Advanced > Proceed to 192.168.4.1 (unsafe)**
-- Firefox: **Advanced > Accept the Risk and Continue**
-- Safari: **Show Details > visit this website**
-
-The browser remembers this. The warning comes back when the certificate
-changes:
-
-- the client-mode IP address changes (it is part of the certificate),
-- the certificate expires (825 days after the firmware build date; uploading
-  newer firmware renews it before then),
-- `regenerateCertificate` is set to `true` in `Certificate.ino`.
-
-#### Certificate generation time
-
-On the first boot after uploading (and whenever the certificate has to be
-replaced), the ESP32 generates a new key and certificate after joining or
-starting Wi-Fi. This usually takes **less than a second, at most about 5
-seconds**. During that time the Wi-Fi network is already visible, but the
-web page does not load yet. This is normal; the device is not stuck.
-Do not power it off.
-
-The serial monitor (115200 baud) always shows these lines, even with
-`LOG_LEVEL` set to `NONE` (example, times and names differ):
-
-```text
-Generating a new TLS certificate because no stored certificate. This ...
-Certificate names/IPs: DNS:miniskidi.local,DNS:miniskidi-xxxxxx.local,IP:192.168.4.1
-TLS certificate generated in 850 ms, valid 20261005000000 - 20290107000000
+```bash
+python3 -m http.server -d web 8000
 ```
 
-The certificate is stored in flash, so later boots reuse it without delay
-(`Using stored TLS certificate ...` at `INFO` level).
+- On a computer with Bluetooth: open `http://localhost:8000` in Chrome.
+- On an Android phone connected by USB, with USB debugging on: in desktop
+  Chrome open `chrome://inspect/#devices`, click **Port forwarding**, add
+  `8000` → `localhost:8000`, then open `http://localhost:8000` in Chrome on
+  the phone.
+
+## Bluetooth details
+
+For other apps, such as a generic BLE tool like nRF Connect:
+
+- Service `d0280000-59cd-41da-9d1e-e7992ddd2cb1`
+- `d0280001-…` **cmd** (write): text commands, for example `MoveCar,1`,
+  `Joy,<turn>,<drive>,<tilt>,<lift>` (-100..100), `Attach,<0..100>`,
+  `Light,0`, `Set,<name>,<value>`, `Ping`. See `handleCarInput()` in
+  [MiniSkidi_3_0.ino](MiniSkidi_3_0.ino).
+- `d0280002-…` **status** (read, notify every 250 ms):
+  `{"rssi":-58,"light":1,"bucket":120,"aux":150}`
+- `d0280003-…` **info** (read): device info and settings as JSON
+
+All three need an encrypted, paired connection (passkey).

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1b1f24"/>
+  <!-- tracks -->
+  <rect x="96" y="300" width="250" height="70" rx="35" fill="#444c56"/>
+  <circle cx="131" cy="335" r="20" fill="#22272e"/>
+  <circle cx="311" cy="335" r="20" fill="#22272e"/>
+  <!-- body and cab -->
+  <rect x="116" y="200" width="200" height="100" rx="14" fill="#e8590c"/>
+  <rect x="146" y="150" width="110" height="70" rx="10" fill="#e8590c"/>
+  <rect x="164" y="166" width="74" height="40" rx="6" fill="#1b1f24"/>
+  <!-- arm and bucket -->
+  <path d="M300 215 L380 260 L380 300" fill="none" stroke="#ffd43b" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M362 290 L430 290 L416 352 L362 352 Z" fill="#ffd43b"/>
+</svg>
