@@ -8,6 +8,10 @@ All the code is written by Claude Opus 5.5 with a human in the loop.
 Firmware for the MiniSkidi skid steer loader, running on an ESP32-WROOM-32D
 ("ESP32 Dev Module").
 
+Phone app (Chrome on Android): [https://nvtkaszpir.github.io/miniskidi/](https://nvtkaszpir.github.io/miniskidi/)
+
+![QR code for the phone app](qrcode.svg)
+
 ## Dependencies
 
 All arduino libraries and dependency versions are pinned in [sketch.yaml](sketch.yaml).
