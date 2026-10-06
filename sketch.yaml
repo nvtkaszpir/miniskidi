@@ -8,7 +8,7 @@ profiles:
     notes: ESP32-WROOM-32D ("ESP32 Dev Module")
     # DebugLevel = core/library log level, keep in sync with LOG_LEVEL in
     # MiniSkidi_3_0.ino
-    fqbn: esp32:esp32:esp32:DebugLevel=debug
+    fqbn: esp32:esp32:esp32:DebugLevel=info
     platforms:
       # Also provides Preferences (settings in flash), so it is not listed
       - platform: esp32:esp32 (2.0.17)
@@ -19,4 +19,4 @@ profiles:
       - NimBLE-Arduino (2.5.1)
 
 default_profile: miniskidi
-default_fqbn: esp32:esp32:esp32:DebugLevel=debug
+default_fqbn: esp32:esp32:esp32:DebugLevel=info

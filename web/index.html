@@ -427,8 +427,18 @@
         <input type="checkbox" id="setInvLift" data-setting="invLift">
       </div>
       <div class="row">
-        <label for="setDeadZone">Dead zone: <span id="deadZoneValue">15</span>%<small>Small stick movements near the center are ignored.</small></label>
-        <input type="range" id="setDeadZone" min="0" max="40" step="1" value="15">
+        <label for="setDeadZone">Dead zone: <span id="deadZoneValue">15</span>%<small>Small stick movements are ignored, separately for each direction: pushing sideways doesn't also move the up/down function.</small></label>
+        <input type="range" id="setDeadZone" data-range="deadZone" min="0" max="40" step="1" value="15">
+      </div>
+
+      <h2>Motors</h2>
+      <div class="row">
+        <label for="setDriveMinDuty">Drive start power: <span id="driveMinDutyValue">90</span> / 255<small>Power of the tracks at the smallest stick movement. Raise it if they only hum.</small></label>
+        <input type="range" id="setDriveMinDuty" data-range="driveMinDuty" min="0" max="200" step="5" value="90">
+      </div>
+      <div class="row">
+        <label for="setArmMinDuty">Boom start power: <span id="armMinDutyValue">90</span> / 255<small>Power of the boom motor at the smallest stick movement.</small></label>
+        <input type="range" id="setArmMinDuty" data-range="armMinDuty" min="0" max="200" step="5" value="90">
       </div>
       <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
 
@@ -627,6 +637,8 @@ async function readInfo() {
     ["Firmware", info.firmware],
     ["Uptime", formatUptime(info.uptime)],
     ["Chip", info.chip],
+    ["Used memory", info.heapSize ? Math.round((info.heapSize - info.heap) / 1024) + " KB of " +
+      Math.round(info.heapSize / 1024) + " KB (" + Math.round((info.heapSize - info.heap) * 100 / info.heapSize) + "%)" : "?"],
     ["Free memory", Math.round(info.heap / 1024) + " KB (lowest " + Math.round(info.minHeap / 1024) + " KB)"],
     ["Connection", "interval " + info.interval + " ms, timeout " + info.timeout + " ms, MTU " + info.mtu],
     ["Paired phones", info.bonds],
@@ -718,7 +730,8 @@ function localOffset(event, el) {
 
 // ---------------------------------------------------------------- Joysticks
 
-const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15 };
+const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15,
+                   driveMinDuty: 90, armMinDuty: 90 };
 
 // A stick follows one finger (pointer). Output x, y: -1..1, y up positive, dead zone applied.
 class Stick {
@@ -751,12 +764,13 @@ class Stick {
     const mag = Math.hypot(nx, ny);
     if (mag > 1) { nx /= mag; ny /= mag; }
     this.knob.style.transform = "translate(" + (nx * radius) + "px," + (-ny * radius) + "px)";
-    // Radial dead zone, rescaled so the output starts at 0 at its edge
+    // Dead zone per axis, rescaled so the output starts at 0 at its edge. Per axis (not a circle)
+    // so pushing sideways doesn't also send a small up/down value: the boom motor would move
+    // with it, at its full start power.
     const dz = settings.deadZone / 100;
-    const m = Math.min(mag, 1);
-    const scale = m <= dz ? 0 : (m - dz) / (1 - dz) / m;
-    this.x = nx * scale;
-    this.y = ny * scale;
+    const axis = (v) => Math.abs(v) <= dz ? 0 : Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
+    this.x = axis(nx);
+    this.y = axis(ny);
     joystickChanged();
   }
   up(e) {
@@ -882,10 +896,13 @@ function applySettings(s) {
   settings.swapTiltLift = !!s.swapTiltLift;
   settings.invTilt = !!s.invTilt;
   settings.invLift = !!s.invLift;
-  settings.deadZone = s.deadZone;
   document.querySelectorAll("[data-setting]").forEach((box) => { box.checked = settings[box.dataset.setting]; });
-  $("setDeadZone").value = settings.deadZone;
-  $("deadZoneValue").textContent = settings.deadZone;
+  document.querySelectorAll("[data-range]").forEach((range) => {
+    const name = range.dataset.range;
+    if (typeof s[name] === "number") settings[name] = s[name];
+    range.value = settings[name];
+    $(name + "Value").textContent = settings[name];
+  });
   updateStickLabels();
 }
 
@@ -896,11 +913,15 @@ document.querySelectorAll("[data-setting]").forEach((box) => {
     updateStickLabels();
   });
 });
-$("setDeadZone").addEventListener("input", (e) => {
-  settings.deadZone = parseInt(e.target.value, 10);
-  $("deadZoneValue").textContent = settings.deadZone;
+// Sliders: the value shows while dragging, it's sent when let go
+document.querySelectorAll("[data-range]").forEach((range) => {
+  const name = range.dataset.range;
+  range.addEventListener("input", () => {
+    settings[name] = parseInt(range.value, 10);
+    $(name + "Value").textContent = settings[name];
+  });
+  range.addEventListener("change", () => send("Set," + name + "," + range.value));
 });
-$("setDeadZone").addEventListener("change", (e) => send("Set,deadZone," + e.target.value));
 $("forgetBtn").addEventListener("click", () => {
   if (confirm("Forget all paired phones? Every phone has to pair again with the passkey.")) {
     send("Set,forgetBonds,1");

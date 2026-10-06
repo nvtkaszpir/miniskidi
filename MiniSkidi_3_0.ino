@@ -68,6 +68,10 @@
 #define FORWARD 1
 #define BACKWARD -1
 
+// Servo index for setServoTarget() (Servos.ino)
+#define BUCKET_SERVO 0
+#define AUX_SERVO 1
+
 // global constants
 
 // Bluetooth name "<bleNamePrefix>-XXXXXX", XXXXXX = end of the ESP32 MAC address, so several
@@ -201,13 +205,14 @@ void moveCar(int inputValue)
   driveCar(inputValue);
 }
 
-void bucketTilt(int bucketServoValue)
+// The servos don't jump to a new angle: Servos.ino moves them there smoothly
+void bucketTilt(float bucketServoValue)
 {
-  bucketServo.write(constrain(bucketServoValue, servoMinAngle, servoMaxAngle));
+  setServoTarget(BUCKET_SERVO, bucketServoValue);
 }
-void auxControl(int auxServoValue)
+void auxControl(float auxServoValue)
 {
-  auxServo.write(constrain(auxServoValue, servoMinAngle, servoMaxAngle));
+  setServoTarget(AUX_SERVO, auxServoValue);
 }
 void setLight(bool on)
 {
@@ -273,7 +278,7 @@ void handleCarInput(const std::string &message)
   }
   else if (key == "Attach")
   {
-    auxControl(map(constrain(valueInt, 0, 100), 0, 100, servoMinAngle, servoMaxAngle));
+    auxControl(servoMinAngle + constrain(valueInt, 0, 100) * (servoMaxAngle - servoMinAngle) / 100.0);
   }
   else if (key == "Bucket")
   {
@@ -311,12 +316,9 @@ void setUpPinModes()
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
-  bucketServo.attach(bucketServoPin);
-  auxServo.attach(auxServoPin);
+  setUpServos(140, 150); // start angles: bucket, AUX
   setUpMotorPwm();
   moveCar(STOP);
-  auxControl(150);
-  bucketTilt(140);
 
   pinMode(lightPin1, OUTPUT);
   pinMode(lightPin2, OUTPUT);
@@ -352,6 +354,7 @@ void loop()
 {
   bleLoop();      // runs queued phone commands, sends the status notification
   driveLoop();    // bucket tilt rate, signal-lost watchdog
+  servoLoop();    // moves the servos smoothly towards their target angles
 
   static unsigned long lastHeapLog = 0;
   if (millis() - lastHeapLog >= 5000)

@@ -1,0 +1,33 @@
+# Task runner: https://taskfile.dev
+#   task build                      compile the sketch
+#   task install                    upload to the board
+#   task all                        compile and upload
+#   task logs                       follow the serial log (Ctrl+C to quit)
+#   task install PORT=/dev/ttyACM0  use another serial port
+version: "3"
+
+vars:
+  PORT: '{{.PORT | default "/dev/ttyUSB0"}}'
+
+tasks:
+  build:
+    desc: Compile the sketch with the pinned dependencies (sketch.yaml)
+    cmds:
+      - uv run arduino-cli compile --profile miniskidi
+
+  install:
+    desc: Upload the compiled sketch to the board on PORT (default /dev/ttyUSB0)
+    cmds:
+      - uv run arduino-cli upload --profile miniskidi -p {{.PORT}}
+
+  all:
+    desc: Compile and upload
+    cmds:
+      - task: build
+      - task: install
+
+  logs:
+    desc: Follow the serial log on PORT at 115200 baud (Ctrl+C to quit)
+    interactive: true
+    cmds:
+      - uv run arduino-cli monitor -p {{.PORT}} -c baudrate=115200

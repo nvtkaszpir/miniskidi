@@ -1,6 +1,6 @@
 // Service worker: keeps the app working offline once it has been opened.
 // Cache first, then network. Bump CACHE after changing any file so phones pick up the new version.
-const CACHE = "miniskidi-v1";
+const CACHE = "miniskidi-v3";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {

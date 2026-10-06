@@ -178,7 +178,9 @@ The top bar is the same on every tab:
 The original MiniSkidi page: arrow buttons for driving and the arm, light
 button, and Bucket and AUX sliders. The keyboard shortcuts still work with
 a keyboard attached: arrows drive, W/S arm, Q/A bucket, E/D AUX. The motors
-run at full speed while a button is held.
+run at full speed while a button is held. When the arm stops after going
+down, it gets a short upward pulse against its momentum, as in the original
+firmware.
 
 ### Joystick tab
 
@@ -199,8 +201,14 @@ Landscape layout, the same as the former RemoteXY screen:
 - The bucket tilt sets a speed, not a position: the bucket keeps tilting
   while the stick is pushed and stays where it is when the stick is let go.
   It moves between 10° and 180°, the same range as the Classic slider.
-- Small movements near the center (the dead zone, 15% by default) are
-  ignored, so a resting thumb doesn't move the machine.
+- Small movements (the dead zone, 15% by default) are ignored, so a resting
+  thumb doesn't move the machine. The dead zone works separately for each
+  direction: pushing the right stick sideways to tilt the bucket doesn't
+  also move the boom with a slightly crooked thumb.
+- Even the smallest movement outside the dead zone gives the motors their
+  start power (Settings), so they don't just hum.
+- The boom stops as soon as the stick is released, without the Classic
+  tab's momentum pulse, so it can be lowered in small steps.
 - The tab switches to fullscreen landscape where Android allows it. If the
   phone stays in portrait (for example with rotation lock on), the screen
   is turned sideways; hold the phone in landscape.
@@ -211,6 +219,9 @@ Landscape layout, the same as the former RemoteXY screen:
 - **Swap bucket tilt and boom lift**: boom on horizontal, bucket on vertical
 - **Invert bucket tilt**, **Invert boom lift**
 - **Dead zone**: 0 to 40%
+- **Drive start power** and **Boom start power** (0 to 200 of 255, default
+  90): the power at the smallest stick movement. Raise it if a motor only
+  hums at small stick movements; lower it for finer slow movements.
 - **Device**: name, Bluetooth address, firmware build date, uptime, chip,
   free memory, connection details, number of paired phones
 - **Forget paired phones**
@@ -237,14 +248,21 @@ The serial monitor logs why the motors were stopped.
 
 ## Tuning
 
-Constants at the top of [Drive.ino](Drive.ino):
+The motor start power is set in the app (Settings tab). Constants at the top
+of [Drive.ino](Drive.ino):
 
-- `motorMinDuty` (default 90 of 255): the lowest power a motor gets once
-  a stick leaves the dead zone. Raise it if the machine only hums and
-  doesn't move at small stick movements; lower it for finer slow driving.
+- `defaultMinDuty` (90 of 255): start power until it is changed in the app.
 - `motorPwmFreq` (default 1000 Hz): PWM frequency of the motor outputs.
 - `bucketMaxRate` (default 90°/s): bucket tilt speed at full deflection.
 - `watchdogTimeoutMs` (default 500 ms): see [Safety](#safety).
+
+Servo smoothing, at the top of [Servos.ino](Servos.ino). The bucket and AUX
+servos don't jump to a new angle; they glide there, so sliders and the
+bucket stick move them smoothly:
+
+- `servoSmoothingMs` (default 80 ms): how quickly a servo follows. Larger is
+  smoother but lags more.
+- `servoMaxSpeed` (default 300°/s): speed limit.
 
 ## Testing the app without GitHub
 
@@ -274,3 +292,22 @@ For other apps, such as a generic BLE tool like nRF Connect:
 - `d0280003-…` **info** (read): device info and settings as JSON
 
 All three need an encrypted, paired connection (passkey).
+
+## Bill Of Materials (BOM)
+
+Miniskidi BOM (to be verified):
+
+- 3x n20 100rpm motors (maybe even one 150rpm for the arm)
+- 2x 9g servos (I used mg90s but can be a digital servo for bucket so it's less noisy)
+- 2x drv8833 drivers for the motors
+- 1x esp32
+- 2x MP1584EN buck converter (not others you may find with 8 holes, 2 per corner)
+- 1x SS-12D10 switch
+- 1x 5A 5x20 fuse (and fuse holder)
+- 2x fenix 16340 batteries - can be other type but these have a
+  safety and charging circuits over USB
+- 2x pcb battery holders (can also 3d print them)
+- 2x 5mm leds with resistors on them
+- 2x 5mm led holders
+- 4x 2 pin jst xh male connectors
+Some dupont pcb headers

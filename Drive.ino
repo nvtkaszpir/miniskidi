@@ -7,9 +7,11 @@
 // PWM frequency and resolution for the motor pins
 const int motorPwmFreq = 1000; // Hz
 const int motorPwmBits = 8;    // duty 0..255; 255 is fully on
-// Lowest duty a motor still turns at. Small joystick movements map to this, not to 0..90, where
-// the motors only hum. Raise it if the machine doesn't move at small stick deflections.
-const int motorMinDuty = 90;
+// Default start power (duty 0..255): the lowest duty a motor gets once the stick leaves the dead
+// zone. Below about 90 the motors only hum. Adjustable in the app's Settings tab, separately
+// for the drive motors and the boom.
+const int defaultMinDuty = 90;
+const int maxMinDuty = 200;
 
 // Bucket tilt speed at full right-stick deflection, degrees per second
 const float bucketMaxRate = 90.0;
@@ -17,6 +19,19 @@ const float bucketMaxRate = 90.0;
 // Signal-lost watchdog: the phone sends something (at least "Ping") every 150 ms. If nothing
 // arrives for this long while anything moves, everything is stopped.
 const unsigned long watchdogTimeoutMs = 500;
+
+// Settings from the app's Settings tab, stored in flash (NVS) so they survive a reboot and are
+// the same for every phone. The app applies the joystick ones itself; the MiniSkidi only keeps
+// them. The start powers are used here, in setMotorSpeed().
+Preferences settingsPrefs;
+bool settingSwapSticks = false;   // left stick drives the arm/bucket, right stick drives
+bool settingSwapTiltLift = false; // right stick X = boom lift, Y = bucket tilt
+bool settingInvTilt = false;
+bool settingInvLift = false;
+int settingDeadZone = 15;         // percent of the stick travel, per axis
+const int maxDeadZone = 40;
+int settingDriveMinDuty = defaultMinDuty; // start power of the track motors
+int settingArmMinDuty = defaultMinDuty;   // start power of the boom motor
 
 ESP32PWM motorPwm[3][2]; // [motor][IN1, IN2]
 int motorSpeed[3] = {0, 0, 0}; // last speed per motor, -255..255
@@ -32,20 +47,21 @@ void setUpMotorPwm()
   }
 }
 
-// speed -255 (full backward) .. 0 (stop) .. 255 (full forward)
+// speed -255 (full backward) .. 0 (stop) .. 255 (full forward). A non-zero speed is scaled into
+// start power..255, so the smallest stick movement already gives enough power to move.
 void setMotorSpeed(int motorNumber, int speed)
 {
   speed = constrain(speed, -255, 255);
   motorSpeed[motorNumber] = speed;
-  int duty = speed == 0 ? 0 : map(abs(speed), 1, 255, motorMinDuty, 255);
+  int minDuty = motorNumber == ARM_MOTOR ? settingArmMinDuty : settingDriveMinDuty;
+  int duty = speed == 0 ? 0 : map(abs(speed), 1, 255, minDuty, 255);
   motorPwm[motorNumber][0].write(speed > 0 ? duty : 0);
   motorPwm[motorNumber][1].write(speed < 0 ? duty : 0);
 }
 
 // Joystick tab state, -100..100 each. Dead zone, swaps and inversions are applied by the app.
 int joyTurn = 0, joyDrive = 0, joyTilt = 0, joyLift = 0;
-float bucketAngle = 0;          // rate-controlled bucket angle, kept as float for slow rates
-int bucketAngleWritten = 0;     // last whole angle sent to the servo by the rate control
+float bucketAngle = 0;          // rate-controlled bucket target angle
 unsigned long lastBucketUpdate = 0;
 unsigned long lastCommandMillis = 0; // last command of any kind from the phone
 
@@ -69,30 +85,28 @@ void joystickInput(int turn, int drive, int tilt, int lift)
     int right = constrain(drive + turn, -100, 100);
     setMotorSpeed(LEFT_MOTOR, percentToSpeed(left));
     setMotorSpeed(RIGHT_MOTOR, percentToSpeed(right));
-    LOGD("Joystick tracks: turn %d drive %d -> left %d right %d", turn, drive, left, right);
+    LOGD("Joystick tracks: turn %+04d drive %+04d -> left %+04d right %+04d", turn, drive, left, right);
   }
 
   if (lift != joyLift)
   {
-    if (lift == 0)
-    {
-      // Arm stops after lowering: brake pulse against the arm's momentum, as in the Classic tab
-      removeArmMomentum = joyLift < 0;
-      rotateMotor(ARM_MOTOR, STOP);
-    }
-    else
-    {
-      setMotorSpeed(ARM_MOTOR, percentToSpeed(lift)); // lift > 0 = arm up = ARMUP direction
-    }
-    LOGD("Joystick lift %d", lift);
+    // lift > 0 = arm up = ARMUP direction. No brake pulse when the arm stops (the Classic tab
+    // keeps it): with speed control it only got in the way of small, precise arm movements.
+    removeArmMomentum = false;
+    setMotorSpeed(ARM_MOTOR, percentToSpeed(lift));
+    LOGD("Joystick lift %+04d", lift);
   }
 
   if (tilt != 0 && joyTilt == 0)
   {
-    // Start of a tilt movement: continue from where the bucket is (the Classic slider may
-    // have moved it)
-    bucketAngle = bucketAngleWritten = bucketServo.read();
+    // Start of a tilt movement: continue from the bucket's current target (the Classic slider
+    // may have moved it)
+    bucketAngle = getServoTarget(BUCKET_SERVO);
     lastBucketUpdate = millis();
+  }
+  if (tilt != joyTilt)
+  {
+    LOGD("Joystick tilt %+04d", tilt);
   }
 
   joyTurn = turn;
@@ -132,8 +146,8 @@ void stopEverything(const char *reason)
 
 void driveLoop()
 {
-  // Bucket tilt: the right stick sets a speed, the angle follows. Releasing the stick (tilt 0)
-  // leaves the bucket where it is.
+  // Bucket tilt: the right stick sets a speed, the target angle follows (Servos.ino then moves
+  // the servo smoothly). Releasing the stick (tilt 0) leaves the bucket where it is.
   if (joyTilt != 0)
   {
     unsigned long now = millis();
@@ -141,14 +155,7 @@ void driveLoop()
     lastBucketUpdate = now;
     bucketAngle = constrain(bucketAngle + joyTilt / 100.0 * bucketMaxRate * dt,
                             (float)servoMinAngle, (float)servoMaxAngle);
-    // Compared with the last written angle, not bucketServo.read(): read() converts back from
-    // the pulse width and may differ by a degree, which would rewrite the servo every loop
-    int angle = (int)(bucketAngle + 0.5);
-    if (angle != bucketAngleWritten)
-    {
-      bucketAngleWritten = angle;
-      bucketTilt(angle);
-    }
+    bucketTilt(bucketAngle);
   }
 
   if (anythingMoving() && millis() - lastCommandMillis > watchdogTimeoutMs)
@@ -156,16 +163,6 @@ void driveLoop()
     stopEverything("no command from the phone for too long (signal lost?)");
   }
 }
-
-// Settings from the app's Settings tab, stored in flash (NVS) so they survive a reboot and are
-// the same for every phone. The app applies them to the joysticks; the MiniSkidi only keeps them.
-Preferences settingsPrefs;
-bool settingSwapSticks = false;   // left stick drives the arm/bucket, right stick drives
-bool settingSwapTiltLift = false; // right stick X = boom lift, Y = bucket tilt
-bool settingInvTilt = false;
-bool settingInvLift = false;
-int settingDeadZone = 15;         // percent of the stick radius
-const int maxDeadZone = 40;
 
 void loadSettings()
 {
@@ -175,6 +172,8 @@ void loadSettings()
   settingInvTilt = settingsPrefs.getBool("invTilt", false);
   settingInvLift = settingsPrefs.getBool("invLift", false);
   settingDeadZone = constrain(settingsPrefs.getInt("deadZone", 15), 0, maxDeadZone);
+  settingDriveMinDuty = constrain(settingsPrefs.getInt("driveMinDuty", defaultMinDuty), 0, maxMinDuty);
+  settingArmMinDuty = constrain(settingsPrefs.getInt("armMinDuty", defaultMinDuty), 0, maxMinDuty);
   settingsPrefs.end();
   LOGI("Settings: %s", settingsJson().c_str());
 }
@@ -213,6 +212,16 @@ void changeSetting(const std::string &name, int value)
     settingDeadZone = constrain(value, 0, maxDeadZone);
     settingsPrefs.putInt("deadZone", settingDeadZone);
   }
+  else if (name == "driveMinDuty")
+  {
+    settingDriveMinDuty = constrain(value, 0, maxMinDuty);
+    settingsPrefs.putInt("driveMinDuty", settingDriveMinDuty);
+  }
+  else if (name == "armMinDuty")
+  {
+    settingArmMinDuty = constrain(value, 0, maxMinDuty);
+    settingsPrefs.putInt("armMinDuty", settingArmMinDuty);
+  }
   else
   {
     LOGW("Unknown setting [%s]", name.c_str());
@@ -223,9 +232,11 @@ void changeSetting(const std::string &name, int value)
 
 String settingsJson()
 {
-  char json[120];
+  char json[200];
   snprintf(json, sizeof(json),
-           "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"deadZone\":%d}",
-           settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingDeadZone);
+           "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"deadZone\":%d,"
+           "\"driveMinDuty\":%d,\"armMinDuty\":%d}",
+           settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingDeadZone,
+           settingDriveMinDuty, settingArmMinDuty);
   return String(json);
 }

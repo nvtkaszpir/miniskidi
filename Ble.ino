@@ -111,14 +111,14 @@ class InfoCallbacks : public NimBLECharacteristicCallbacks
 
 String infoJson(uint16_t mtu, uint16_t interval, uint16_t timeout)
 {
-  char json[420];
+  char json[512];
   snprintf(json, sizeof(json),
            "{\"name\":\"%s\",\"mac\":\"%s\",\"firmware\":\"%s %s\",\"uptime\":%lu,"
-           "\"chip\":\"%s rev %d, %d cores, %u MHz\",\"heap\":%u,\"minHeap\":%u,"
+           "\"chip\":\"%s rev %d, %d cores, %u MHz\",\"heapSize\":%u,\"heap\":%u,\"minHeap\":%u,"
            "\"mtu\":%u,\"interval\":%.2f,\"timeout\":%u,\"bonds\":%d,\"settings\":%s}",
            deviceName.c_str(), NimBLEDevice::getAddress().toString().c_str(), __DATE__, __TIME__,
            millis() / 1000, ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(),
-           ESP.getCpuFreqMHz(), ESP.getFreeHeap(), ESP.getMinFreeHeap(), mtu, interval * 1.25,
+           ESP.getCpuFreqMHz(), ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMinFreeHeap(), mtu, interval * 1.25,
            timeout * 10, NimBLEDevice::getNumBonds(), settingsJson().c_str());
   return String(json);
 }
@@ -167,7 +167,7 @@ String statusJson(int rssi)
 {
   char json[96];
   snprintf(json, sizeof(json), "{\"rssi\":%d,\"light\":%d,\"bucket\":%d,\"aux\":%d}", rssi, light,
-           bucketServo.read(), auxServo.read());
+           (int)(getServoTarget(BUCKET_SERVO) + 0.5), (int)(getServoTarget(AUX_SERVO) + 0.5));
   return String(json);
 }
 
