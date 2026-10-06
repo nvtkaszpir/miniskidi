@@ -316,6 +316,7 @@
   table.info td { padding: 6px 0; border-bottom: 1px solid var(--stick-base); vertical-align: top; }
   table.info td:first-child { color: var(--muted); width: 40%; padding-right: 8px; }
   table.info td:last-child { overflow-wrap: anywhere; }
+  table.info a { color: var(--accent); }
 </style>
 </head>
 <body class="noselect">
@@ -442,6 +443,9 @@
       </div>
       <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
 
+      <h2>Web app</h2>
+      <table class="info"><tbody id="appTable"></tbody></table>
+
       <h2>Device</h2>
       <table class="info"><tbody id="infoTable"><tr><td>Status</td><td>Not connected</td></tr></tbody></table>
 
@@ -456,6 +460,10 @@
 
 <script>
 "use strict";
+
+// Commit this copy of the app was published from. The GitHub Pages workflow
+// (.github/workflows/pages.yml) replaces this line; a local copy keeps the placeholder.
+const APP_BUILD = {"commit": "__APP_COMMIT__", "date": "", "subject": "", "url": ""};
 
 // Keep in sync with Ble.ino
 const SERVICE_UUID = "d0280000-59cd-41da-9d1e-e7992ddd2cb1";
@@ -656,6 +664,30 @@ async function readInfo() {
 function formatUptime(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;
   return (h ? h + " h " : "") + (h || m ? m + " min " : "") + s + " s";
+}
+
+// Settings tab, "Web app": which commit this copy of the app comes from
+function showAppBuild() {
+  const table = $("appTable");
+  const row = (name, value) => {
+    const tr = table.insertRow();
+    tr.insertCell().textContent = name;
+    const cell = tr.insertCell();
+    if (value instanceof Node) cell.appendChild(value);
+    else cell.textContent = value;
+  };
+  if (APP_BUILD.commit === "__APP_COMMIT__") {
+    row("Version", "local copy (not published from GitHub)");
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = APP_BUILD.url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = APP_BUILD.commit.slice(0, 7);
+  row("Commit", link);
+  if (APP_BUILD.date) row("Date", new Date(APP_BUILD.date).toLocaleString());
+  if (APP_BUILD.subject) row("Change", APP_BUILD.subject);
 }
 
 // ---------------------------------------------------------------- Signal indicator
@@ -1005,6 +1037,7 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 updateStickLabels();
 updateSignal();
+showAppBuild();
 
 if (!navigator.bluetooth) {
   showNotice("This browser has no Web Bluetooth. Open this page in Chrome on Android" +

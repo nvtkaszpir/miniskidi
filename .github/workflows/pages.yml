@@ -25,6 +25,37 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Writes the commit into the app (shown in its Settings tab) and into the service worker's
+      # cache name, so installed apps pick up every new deploy
+      - name: Stamp the commit into the app
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, subprocess
+
+          sha = os.environ["GITHUB_SHA"]
+          git = lambda fmt: subprocess.check_output(["git", "log", "-1", "--format=" + fmt], text=True).strip()
+          build = {
+              "commit": sha,
+              "date": git("%cI"),
+              "subject": git("%s"),
+              "url": f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/commit/{sha}',
+          }
+
+          def stamp(path, pattern, replacement):
+              with open(path) as f:
+                  text = f.read()
+              text, count = re.subn(pattern, lambda m: replacement, text, flags=re.M)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match for {pattern}, found {count}")
+              with open(path, "w") as f:
+                  f.write(text)
+
+          # "<" escaped so a commit message with "</script>" can't end the page's script early
+          app_build = json.dumps(build).replace("<", "\\u003c")
+          stamp("web/index.html", r"^const APP_BUILD = .*;$", "const APP_BUILD = " + app_build + ";")
+          stamp("web/sw.js", r'^const CACHE = ".*";$', f'const CACHE = "miniskidi-{sha[:12]}";')
+          print(json.dumps(build, indent=2))
+          EOF
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

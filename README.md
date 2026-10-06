@@ -130,8 +130,11 @@ Bluetooth.
   for the currently rendered github pages.
 
 
-After changing files in `web/`, raise `CACHE` in [web/sw.js](web/sw.js)
-(for example `miniskidi-v2`), so installed apps load the new version.
+The workflow writes the commit it publishes into the app: **Settings > Web
+app** shows the commit (linked to GitHub), its date and message. It also
+puts the commit into the offline cache name in [web/sw.js](web/sw.js), so
+installed apps load every new version. A copy served locally shows "local
+copy".
 
 ## Connecting
 

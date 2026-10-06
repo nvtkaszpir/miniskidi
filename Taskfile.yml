@@ -3,6 +3,7 @@
 #   task install                    upload to the board
 #   task all                        compile and upload
 #   task logs                       follow the serial log (Ctrl+C to quit)
+#   task watch                      on every source change: build, upload, follow the log
 #   task install PORT=/dev/ttyACM0  use another serial port
 version: "3"
 
@@ -31,3 +32,9 @@ tasks:
     interactive: true
     cmds:
       - uv run arduino-cli monitor -p {{.PORT}} -c baudrate=115200
+
+  watch:
+    desc: On every firmware source change build, upload and follow the serial log (Ctrl+C to quit)
+    interactive: true
+    cmds:
+      - scripts/watch.sh {{.PORT}} {{.TASK_EXE}}
