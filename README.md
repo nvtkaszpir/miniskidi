@@ -1,5 +1,8 @@
 # MiniSkidi 3.0
 
+A rewrite of [https://github.com/ProfBoots/MiniSkidi-V3.0](https://github.com/ProfBoots/MiniSkidi-V3.0)
+with a guidance from HellBirdy67 from Discord.
+
 All the code is written by Claude Opus 5.5 with a human in the loop.
 
 Firmware for the MiniSkidi skid steer loader, running on an ESP32-WROOM-32D
