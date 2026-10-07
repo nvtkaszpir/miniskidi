@@ -140,6 +140,8 @@ copy".
 
 1. Change the passkey before the first upload: `blePasskey` in
    [MiniSkidi_3_0.ino](MiniSkidi_3_0.ino) (6 digits, default `123456`).
+   It **must not start with 0**: the sketch would read a number like
+   `012345` as a different value, so the build stops with an error.
 2. Power on the MiniSkidi. The serial monitor shows its Bluetooth name,
    `MiniSkidi-XXXXXX`, where `XXXXXX` is the end of the ESP32 MAC address.
 3. On the phone, turn on Bluetooth (on Android 11 and older, also Location),
@@ -236,9 +238,22 @@ Landscape layout, the same as the former RemoteXY screen:
   runs the other way, so the stick matches the labels drawn on it
 - **8 direction zones on the arm stick** (on by default)
 - **Dead zone**: 0 to 40%
-- **Drive start power** and **Boom start power** (0 to 200 of 255, default
-  90): the power at the smallest stick movement. Raise it if a motor only
-  hums at small stick movements; lower it for finer slow movements.
+- **Speed limits** for the Joystick tab (the Classic tab always runs at
+  full speed):
+
+  | Setting | Default | Meaning |
+  |---|---|---|
+  | Tracks start power | 90 / 255 | track power at the smallest stick movement; raise it if they only hum |
+  | Drive top speed | 80% | forward / backward at full stick |
+  | Turn top speed | 80% | turning at full stick |
+  | Boom start power | 90 / 255 | boom power at the smallest stick movement |
+  | Boom top speed | 20% | boom up / down at full stick |
+  | Bucket min speed | 0% | bucket tilt speed at the smallest stick movement |
+  | Bucket top speed | 20% | bucket tilt speed at full stick (100% = 180°/s) |
+
+  A top speed is the share of the power range above the start power, so a
+  low top speed keeps a function slow and precise but still strong enough
+  to move. Example: boom at 20% gives about 120 / 255 at full stick.
 - **Device**: name, Bluetooth address, firmware build date, uptime, chip,
   free memory, connection details, number of paired phones
 - **Forget paired phones**
@@ -265,12 +280,15 @@ The serial monitor logs why the motors were stopped.
 
 ## Tuning
 
-The motor start power is set in the app (Settings tab). Constants at the top
-of [Drive.ino](Drive.ino):
+Start power and speed limits are set in the app (Settings tab). Constants
+at the top of [Drive.ino](Drive.ino):
 
-- `defaultMinDuty` (90 of 255): start power until it is changed in the app.
+- `defaultMinDuty`, `defaultDriveMax`, `defaultTurnMax`, `defaultBoomMax`,
+  `defaultTiltMin`, `defaultTiltMax`: the speed limits until they are
+  changed in the app.
 - `motorPwmFreq` (default 1000 Hz): PWM frequency of the motor outputs.
-- `bucketMaxRate` (default 90°/s): bucket tilt speed at full deflection.
+- `bucketMaxRate` (default 180°/s): bucket tilt speed at 100% bucket top
+  speed and full deflection.
 - `watchdogTimeoutMs` (default 500 ms): see [Safety](#safety).
 
 Servo smoothing, at the top of [Servos.ino](Servos.ino). The bucket and AUX

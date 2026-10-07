@@ -13,8 +13,8 @@ const int motorPwmBits = 8;    // duty 0..255; 255 is fully on
 const int defaultMinDuty = 90;
 const int maxMinDuty = 200;
 
-// Bucket tilt speed at full right-stick deflection, degrees per second
-const float bucketMaxRate = 90.0;
+// Bucket tilt speed at 100% "Bucket top speed" and full right-stick deflection, degrees per second
+const float bucketMaxRate = 180.0;
 
 // Signal-lost watchdog: the phone sends something (at least "Ping") every 150 ms. If nothing
 // arrives for this long while anything moves, everything is stopped.
@@ -33,6 +33,16 @@ int settingDeadZone = 15;         // percent of the stick travel, per axis
 const int maxDeadZone = 40;
 int settingDriveMinDuty = defaultMinDuty; // start power of the track motors
 int settingArmMinDuty = defaultMinDuty;   // start power of the boom motor
+// Top speeds, percent: how much of the range above the start power a full stick deflection uses
+// (100 = full power). They keep e.g. the boom from moving too fast for fine work.
+const int defaultDriveMax = 80, defaultTurnMax = 80, defaultBoomMax = 20;
+int settingDriveMax = defaultDriveMax; // forward / backward
+int settingTurnMax = defaultTurnMax;   // turning (track speed difference)
+int settingBoomMax = defaultBoomMax;
+// Bucket tilt speed range, percent of bucketMaxRate: at the smallest and at full deflection
+const int defaultTiltMin = 0, defaultTiltMax = 20;
+int settingTiltMin = defaultTiltMin;
+int settingTiltMax = defaultTiltMax;
 
 ESP32PWM motorPwm[3][2]; // [motor][IN1, IN2]
 int motorSpeed[3] = {0, 0, 0}; // last speed per motor, -255..255
@@ -66,9 +76,17 @@ float bucketAngle = 0;          // rate-controlled bucket target angle
 unsigned long lastBucketUpdate = 0;
 unsigned long lastCommandMillis = 0; // last command of any kind from the phone
 
-int percentToSpeed(int percent)
+// -100..100 percent -> setMotorSpeed() speed -255..255. Not rounded to 0 for tiny values, so a
+// stick just outside the dead zone still starts the motor (at its start power).
+int percentToSpeed(float percent)
 {
-  return constrain(percent, -100, 100) * 255 / 100;
+  percent = constrain(percent, -100.0f, 100.0f);
+  int speed = (int)(percent * 2.55f + (percent >= 0 ? 0.5f : -0.5f));
+  if (speed == 0 && percent != 0)
+  {
+    speed = percent > 0 ? 1 : -1;
+  }
+  return speed;
 }
 
 void joystickInput(int turn, int drive, int tilt, int lift)
@@ -80,13 +98,17 @@ void joystickInput(int turn, int drive, int tilt, int lift)
 
   if (turn != joyTurn || drive != joyDrive)
   {
-    // Tank mixing, same directions as the Classic D-pad: turning left (turn < 0) runs the left
-    // track forward and the right track backward, like the LEFT case in driveCar()
-    int left = constrain(drive - turn, -100, 100);
-    int right = constrain(drive + turn, -100, 100);
+    // Top speeds first, then tank mixing, same directions as the Classic D-pad: turning left
+    // (turn < 0) runs the left track forward and the right track backward, like the LEFT case
+    // in driveCar()
+    float d = drive * settingDriveMax / 100.0;
+    float t = turn * settingTurnMax / 100.0;
+    float left = constrain(d - t, -100.0f, 100.0f);
+    float right = constrain(d + t, -100.0f, 100.0f);
     setMotorSpeed(LEFT_MOTOR, percentToSpeed(left));
     setMotorSpeed(RIGHT_MOTOR, percentToSpeed(right));
-    LOGD("Joystick tracks: turn %+04d drive %+04d -> left %+04d right %+04d", turn, drive, left, right);
+    LOGD("Joystick tracks: turn %+04d drive %+04d -> left %+04d right %+04d", turn, drive,
+         (int)round(left), (int)round(right));
   }
 
   if (lift != joyLift)
@@ -97,7 +119,7 @@ void joystickInput(int turn, int drive, int tilt, int lift)
     // No brake pulse when the arm stops (the Classic tab keeps it): with speed control it only
     // got in the way of small, precise arm movements.
     removeArmMomentum = false;
-    setMotorSpeed(ARM_MOTOR, -percentToSpeed(lift));
+    setMotorSpeed(ARM_MOTOR, -percentToSpeed(lift * settingBoomMax / 100.0));
     LOGD("Joystick lift %+04d", lift);
   }
 
@@ -157,8 +179,11 @@ void driveLoop()
     unsigned long now = millis();
     float dt = (now - lastBucketUpdate) / 1000.0;
     lastBucketUpdate = now;
-    bucketAngle = constrain(bucketAngle + joyTilt / 100.0 * bucketMaxRate * dt,
-                            (float)servoMinAngle, (float)servoMaxAngle);
+    // Speed from "Bucket min speed" at the smallest deflection to "Bucket top speed" at full
+    float tiltMin = min(settingTiltMin, settingTiltMax);
+    float percent = tiltMin + (settingTiltMax - tiltMin) * abs(joyTilt) / 100.0;
+    float rate = (joyTilt > 0 ? 1 : -1) * percent / 100.0 * bucketMaxRate;
+    bucketAngle = constrain(bucketAngle + rate * dt, (float)servoMinAngle, (float)servoMaxAngle);
     bucketTilt(bucketAngle);
   }
 
@@ -187,6 +212,11 @@ void loadSettings()
   settingDeadZone = constrain(settingsPrefs.getInt("deadZone", 15), 0, maxDeadZone);
   settingDriveMinDuty = constrain(settingsPrefs.getInt("driveMinDuty", defaultMinDuty), 0, maxMinDuty);
   settingArmMinDuty = constrain(settingsPrefs.getInt("armMinDuty", defaultMinDuty), 0, maxMinDuty);
+  settingDriveMax = constrain(settingsPrefs.getInt("driveMax", defaultDriveMax), 0, 100);
+  settingTurnMax = constrain(settingsPrefs.getInt("turnMax", defaultTurnMax), 0, 100);
+  settingBoomMax = constrain(settingsPrefs.getInt("boomMax", defaultBoomMax), 0, 100);
+  settingTiltMin = constrain(settingsPrefs.getInt("tiltMin", defaultTiltMin), 0, 100);
+  settingTiltMax = constrain(settingsPrefs.getInt("tiltMax", defaultTiltMax), 0, 100);
   settingsPrefs.end();
   LOGI("Settings: %s", settingsJson().c_str());
 }
@@ -240,6 +270,18 @@ void changeSetting(const std::string &name, int value)
     settingArmMinDuty = constrain(value, 0, maxMinDuty);
     settingsPrefs.putInt("armMinDuty", settingArmMinDuty);
   }
+  else if (name == "driveMax" || name == "turnMax" || name == "boomMax" || name == "tiltMin" ||
+           name == "tiltMax")
+  {
+    value = constrain(value, 0, 100);
+    int *setting = name == "driveMax" ? &settingDriveMax
+                 : name == "turnMax"  ? &settingTurnMax
+                 : name == "boomMax"  ? &settingBoomMax
+                 : name == "tiltMin"  ? &settingTiltMin
+                                      : &settingTiltMax;
+    *setting = value;
+    settingsPrefs.putInt(name.c_str(), value);
+  }
   else
   {
     LOGW("Unknown setting [%s]", name.c_str());
@@ -250,11 +292,13 @@ void changeSetting(const std::string &name, int value)
 
 String settingsJson()
 {
-  char json[200];
+  char json[256];
   snprintf(json, sizeof(json),
            "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"armZones\":%d,"
-           "\"deadZone\":%d,\"driveMinDuty\":%d,\"armMinDuty\":%d}",
+           "\"deadZone\":%d,\"driveMinDuty\":%d,\"armMinDuty\":%d,\"driveMax\":%d,\"turnMax\":%d,"
+           "\"boomMax\":%d,\"tiltMin\":%d,\"tiltMax\":%d}",
            settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingArmZones,
-           settingDeadZone, settingDriveMinDuty, settingArmMinDuty);
+           settingDeadZone, settingDriveMinDuty, settingArmMinDuty, settingDriveMax, settingTurnMax,
+           settingBoomMax, settingTiltMin, settingTiltMax);
   return String(json);
 }

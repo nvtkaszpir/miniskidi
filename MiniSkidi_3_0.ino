@@ -80,7 +80,11 @@ const char* bleNamePrefix = "MiniSkidi";
 // 6-digit passkey entered on the phone when pairing for the first time. Change it before use!
 // After changing it, phones that paired before must "Forget" the MiniSkidi in Android's
 // Bluetooth settings, and the MiniSkidi's own bonds are cleared from the app's Settings tab.
+// It must not start with 0: in C++ a number with a leading 0 is octal, so 012345 would become
+// a different passkey (5349). The check below stops the build if it's not 6 digits.
 const uint32_t blePasskey = 123456;
+static_assert(blePasskey >= 100000 && blePasskey <= 999999,
+              "blePasskey must have 6 digits and must not start with 0");
 
 // Servo angle limits, the same as the Classic tab sliders
 const int servoMinAngle = 10;

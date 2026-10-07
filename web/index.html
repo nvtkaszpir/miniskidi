@@ -452,14 +452,35 @@
         <input type="range" id="setDeadZone" data-range="deadZone" min="0" max="40" step="1" value="15">
       </div>
 
-      <h2>Motors</h2>
+      <h2>Speed limits (Joystick tab)</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 4px">Start power is the lowest power, at the smallest stick movement. Top speed is how much of the rest a full stick movement uses: lower it to keep a function slow and precise. The Classic tab always runs at full speed.</p>
       <div class="row">
-        <label for="setDriveMinDuty">Drive start power: <span id="driveMinDutyValue">90</span> / 255<small>Power of the tracks at the smallest stick movement. Raise it if they only hum.</small></label>
+        <label for="setDriveMinDuty">Tracks start power: <span id="driveMinDutyValue">90</span> / 255<small>Raise it if the tracks only hum at small stick movements.</small></label>
         <input type="range" id="setDriveMinDuty" data-range="driveMinDuty" min="0" max="200" step="5" value="90">
       </div>
       <div class="row">
-        <label for="setArmMinDuty">Boom start power: <span id="armMinDutyValue">90</span> / 255<small>Power of the boom motor at the smallest stick movement.</small></label>
+        <label for="setDriveMax">Drive top speed: <span id="driveMaxValue">80</span>%<small>Forward and backward.</small></label>
+        <input type="range" id="setDriveMax" data-range="driveMax" min="0" max="100" step="5" value="80">
+      </div>
+      <div class="row">
+        <label for="setTurnMax">Turn top speed: <span id="turnMaxValue">80</span>%<small>Turning left and right.</small></label>
+        <input type="range" id="setTurnMax" data-range="turnMax" min="0" max="100" step="5" value="80">
+      </div>
+      <div class="row">
+        <label for="setArmMinDuty">Boom start power: <span id="armMinDutyValue">90</span> / 255<small>Raise it if the boom only hums at small stick movements.</small></label>
         <input type="range" id="setArmMinDuty" data-range="armMinDuty" min="0" max="200" step="5" value="90">
+      </div>
+      <div class="row">
+        <label for="setBoomMax">Boom top speed: <span id="boomMaxValue">20</span>%<small>Boom up and down.</small></label>
+        <input type="range" id="setBoomMax" data-range="boomMax" min="0" max="100" step="5" value="20">
+      </div>
+      <div class="row">
+        <label for="setTiltMin">Bucket min speed: <span id="tiltMinValue">0</span>%<small>Bucket tilt speed at the smallest stick movement.</small></label>
+        <input type="range" id="setTiltMin" data-range="tiltMin" min="0" max="100" step="5" value="0">
+      </div>
+      <div class="row">
+        <label for="setTiltMax">Bucket top speed: <span id="tiltMaxValue">20</span>%<small>Bucket tilt speed at full stick movement (100% = 180°/s).</small></label>
+        <input type="range" id="setTiltMax" data-range="tiltMax" min="0" max="100" step="5" value="20">
       </div>
       <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
 
@@ -783,7 +804,8 @@ function localOffset(event, el) {
 // ---------------------------------------------------------------- Joysticks
 
 const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15,
-                   driveMinDuty: 90, armMinDuty: 90, armZones: true };
+                   driveMinDuty: 90, armMinDuty: 90, armZones: true,
+                   driveMax: 80, turnMax: 80, boomMax: 20, tiltMin: 0, tiltMax: 20 };
 
 // The 8 zones of the arm stick, counter-clockwise from right (east): stick direction x, y
 const ZONE_DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
