@@ -518,6 +518,16 @@
         <label for="setBucketMax">Bucket max angle: <span id="bucketMaxValue">180</span>°<small>Highest servo angle (180° = servo limit).</small></label>
         <input type="range" id="setBucketMax" data-range="bucketMax" min="20" max="180" step="1" value="180">
       </div>
+      <h2>Start position</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 4px">Where the servos go when the MiniSkidi is switched on. Used at the next power-on; changing it doesn't move the servos now. The bucket start is kept inside the bucket angle range above.</p>
+      <div class="row">
+        <label for="setBucketStart">Bucket start angle: <span id="bucketStartValue">140</span>°</label>
+        <input type="range" id="setBucketStart" data-range="bucketStart" min="10" max="180" step="1" value="140">
+      </div>
+      <div class="row">
+        <label for="setAuxStart">AUX start angle: <span id="auxStartValue">150</span>°</label>
+        <input type="range" id="setAuxStart" data-range="auxStart" min="10" max="180" step="1" value="150">
+      </div>
       <p style="color:var(--muted);font-size:13px">The boom has no angle limit: its motor has no position sensor, so the MiniSkidi can't know where the boom is. Use Boom top speed to keep it slow.</p>
       <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
 
@@ -548,6 +558,7 @@ const SERVICE_UUID = "d0280000-59cd-41da-9d1e-e7992ddd2cb1";
 const CMD_UUID     = "d0280001-59cd-41da-9d1e-e7992ddd2cb1";
 const STATUS_UUID  = "d0280002-59cd-41da-9d1e-e7992ddd2cb1";
 const INFO_UUID    = "d0280003-59cd-41da-9d1e-e7992ddd2cb1";
+const SETTINGS_UUID = "d0280004-59cd-41da-9d1e-e7992ddd2cb1";
 
 const PING_INTERVAL_MS = 150;   // keep-alive for the MiniSkidi's 500 ms watchdog
 const JOY_REPEAT_MS = 100;      // stick frames are repeated this often while a stick is moved
@@ -566,6 +577,7 @@ let device = null;
 let cmdChar = null;
 let statusChar = null;
 let infoChar = null;
+let settingsChar = null; // null with older firmware: the settings are then part of the info
 let connected = false;
 let userDisconnect = false;
 let everConnected = false; // auto-reconnect only after a connection worked (not after a failed pairing)
@@ -608,6 +620,7 @@ async function connectGatt() {
     cmdChar = await service.getCharacteristic(CMD_UUID);
     statusChar = await service.getCharacteristic(STATUS_UUID);
     infoChar = await service.getCharacteristic(INFO_UUID);
+    settingsChar = await service.getCharacteristic(SETTINGS_UUID).catch(() => null);
     // The first access to a protected characteristic starts pairing: Android asks for the passkey
     await readInfo();
     statusChar.addEventListener("characteristicvaluechanged", onStatus);
@@ -628,7 +641,7 @@ async function connectGatt() {
 
 function onDisconnected() {
   connected = false;
-  cmdChar = statusChar = infoChar = null;
+  cmdChar = statusChar = infoChar = settingsChar = null;
   writeQueue.length = 0;
   writing = false;
   releaseSticks();
@@ -716,7 +729,7 @@ function onStatus(event) {
 async function readInfo() {
   if (!infoChar) return;
   const info = JSON.parse(decoder.decode(await infoChar.readValue()));
-  applySettings(info.settings);
+  applySettings(settingsChar ? JSON.parse(decoder.decode(await settingsChar.readValue())) : info.settings);
   const rows = [
     ["Name", info.name],
     ["Bluetooth address", info.mac],
@@ -843,7 +856,7 @@ function localOffset(event, el) {
 const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15,
                    driveMinDuty: 90, armMinDuty: 90, armZones: true,
                    driveMax: 80, turnMax: 80, boomMax: 20, tiltMin: 0, tiltMax: 20,
-                   bucketMin: 10, bucketMax: 180 };
+                   bucketMin: 10, bucketMax: 180, bucketStart: 140, auxStart: 150 };
 const MIN_BUCKET_RANGE = 10; // degrees between bucket min and max, as in Drive.ino
 
 // The 8 zones of the arm stick, counter-clockwise from right (east): stick direction x, y
@@ -1133,7 +1146,8 @@ document.querySelectorAll("[data-range]").forEach((range) => {
     if (name === "deadZone") updateStickLabels(); // redraw the zones
   });
   // Bucket angles are sent while dragging, so the bucket moves to the limit and it can be watched
-  range.addEventListener(name.startsWith("bucket") ? "input" : "change", () => send("Set," + name + "," + range.value, "Set" + name));
+  const live = name === "bucketMin" || name === "bucketMax";
+  range.addEventListener(live ? "input" : "change", () => send("Set," + name + "," + range.value, "Set" + name));
 });
 $("forgetBtn").addEventListener("click", () => {
   if (confirm("Forget all paired phones? Every phone has to pair again with the passkey.")) {

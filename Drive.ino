@@ -48,6 +48,10 @@ int settingTiltMax = defaultTiltMax;
 int settingBucketMin = servoMinAngle;
 int settingBucketMax = servoMaxAngle;
 const int minBucketRange = 10; // degrees between min and max at least
+// Servo angles at power-on (the bucket's is kept inside the bucket angle range)
+const int defaultBucketStart = 140, defaultAuxStart = 150;
+int settingBucketStart = defaultBucketStart;
+int settingAuxStart = defaultAuxStart;
 
 ESP32PWM motorPwm[3][2]; // [motor][IN1, IN2]
 int motorSpeed[3] = {0, 0, 0}; // last speed per motor, -255..255
@@ -262,6 +266,8 @@ void loadSettings()
                                servoMaxAngle - minBucketRange);
   settingBucketMax = constrain(settingsPrefs.getInt("bucketMaxAng", servoMaxAngle),
                                settingBucketMin + minBucketRange, servoMaxAngle);
+  settingBucketStart = constrain(settingsPrefs.getInt("bucketStart", defaultBucketStart), servoMinAngle, servoMaxAngle);
+  settingAuxStart = constrain(settingsPrefs.getInt("auxStart", defaultAuxStart), servoMinAngle, servoMaxAngle);
   settingsPrefs.end();
   setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
   LOGI("Settings: %s", settingsJson().c_str());
@@ -340,6 +346,13 @@ void changeSetting(const std::string &name, int value)
     settingsPrefs.putInt("bucketMaxAng", settingBucketMax);
     setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
   }
+  else if (name == "bucketStart" || name == "auxStart")
+  {
+    // Used at the next power-on; doesn't move the servo now
+    value = constrain(value, servoMinAngle, servoMaxAngle);
+    *(name == "bucketStart" ? &settingBucketStart : &settingAuxStart) = value;
+    settingsPrefs.putInt(name.c_str(), value);
+  }
   else
   {
     LOGW("Unknown setting [%s]", name.c_str());
@@ -350,13 +363,21 @@ void changeSetting(const std::string &name, int value)
 
 String settingsJson()
 {
-  char json[256];
+  char json[384];
   snprintf(json, sizeof(json),
            "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"armZones\":%d,"
            "\"deadZone\":%d,\"driveMinDuty\":%d,\"armMinDuty\":%d,\"driveMax\":%d,\"turnMax\":%d,"
-           "\"boomMax\":%d,\"tiltMin\":%d,\"tiltMax\":%d,\"bucketMin\":%d,\"bucketMax\":%d}",
+           "\"boomMax\":%d,\"tiltMin\":%d,\"tiltMax\":%d,\"bucketMin\":%d,\"bucketMax\":%d,"
+           "\"bucketStart\":%d,\"auxStart\":%d}",
            settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingArmZones,
            settingDeadZone, settingDriveMinDuty, settingArmMinDuty, settingDriveMax, settingTurnMax,
-           settingBoomMax, settingTiltMin, settingTiltMax, settingBucketMin, settingBucketMax);
+           settingBoomMax, settingTiltMin, settingTiltMax, settingBucketMin, settingBucketMax,
+           settingBucketStart, settingAuxStart);
   return String(json);
+}
+
+// Servo angle at power-on, from the settings
+int servoStartAngle(int servo)
+{
+  return servo == BUCKET_SERVO ? settingBucketStart : settingAuxStart;
 }

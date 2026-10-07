@@ -51,7 +51,8 @@ void writeServo(int i)
   }
 }
 
-// Attaches the servos and moves them straight (without smoothing) to the start angles
+// Attaches the servos and moves them straight (without smoothing) to the start angles, kept
+// inside each servo's allowed range (loadSettings() has set the bucket's range already)
 void setUpServos(float bucketAngle, float auxAngle)
 {
   float start[2] = {bucketAngle, auxAngle};
@@ -67,7 +68,7 @@ void setUpServos(float bucketAngle, float auxAngle)
   }
   for (int i = 0; i < 2; i++)
   {
-    servoPos[i] = servoTarget[i] = constrain(start[i], (float)servoMinAngle, (float)servoMaxAngle);
+    servoPos[i] = servoTarget[i] = constrain(start[i], servoLimitMin[i], servoLimitMax[i]);
     writeServo(i);
   }
   lastServoUpdate = millis();

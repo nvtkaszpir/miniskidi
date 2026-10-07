@@ -286,6 +286,9 @@ Landscape layout, the same as the former RemoteXY screen:
   frame or the boom. The bucket moves to a new limit while you drag the
   slider, so you can watch where it stops. The boom has no angle limit: its
   DC motor has no position sensor, so the firmware can't know where it is.
+- **Start position**: the bucket and AUX servo angles at power-on (defaults
+  140° and 150°). Used at the next power-on, not right away. The bucket
+  start angle is kept inside the bucket angle range.
 - **Device**: name, Bluetooth address, firmware build date, uptime, chip,
   free memory, connection details, number of paired phones
 - **Forget paired phones**
@@ -356,9 +359,10 @@ For other apps, such as a generic BLE tool like nRF Connect:
   [MiniSkidi_3_0.ino](MiniSkidi_3_0.ino).
 - `d0280002-…` **status** (read, notify every 250 ms):
   `{"rssi":-58,"light":1,"bucket":120,"aux":150}`
-- `d0280003-…` **info** (read): device info and settings as JSON
+- `d0280003-…` **info** (read): device info as JSON
+- `d0280004-…` **settings** (read): the Settings tab options as JSON
 
-All three need an encrypted, paired connection (passkey).
+All four need an encrypted, paired connection (passkey).
 
 ## Bill Of Materials (BOM)
 

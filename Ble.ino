@@ -1,11 +1,13 @@
 // Bluetooth Low Energy (BLE) GATT server: the phone app (web/, Chrome on Android with Web
 // Bluetooth) connects here.
 //
-// One service with three characteristics:
-//   cmd    (write / write without response): text commands, see handleCarInput()
-//   status (read / notify every statusIntervalMs): {"rssi":-58,"light":1,"bucket":120,"aux":150}
-//   info   (read): device info and settings as JSON, for the Settings tab
-// All three need an encrypted, authenticated (passkey) link. On first use Android shows its
+// One service with four characteristics:
+//   cmd      (write / write without response): text commands, see handleCarInput()
+//   status   (read / notify every statusIntervalMs): {"rssi":-58,"light":1,"bucket":120,"aux":150}
+//   info     (read): device info as JSON, for the Settings tab
+//   settings (read): the Settings tab options as JSON (settingsJson() in Drive.ino)
+// A characteristic value can be at most 512 bytes, which is why the settings have their own.
+// All four need an encrypted, authenticated (passkey) link. On first use Android shows its
 // pairing dialog, where the user types blePasskey. The phone stays paired (bonded) after that.
 //
 // One phone at a time: advertising stops while a phone is connected and restarts when it
@@ -19,6 +21,7 @@
 #define BLE_CMD_UUID     "d0280001-59cd-41da-9d1e-e7992ddd2cb1"
 #define BLE_STATUS_UUID  "d0280002-59cd-41da-9d1e-e7992ddd2cb1"
 #define BLE_INFO_UUID    "d0280003-59cd-41da-9d1e-e7992ddd2cb1"
+#define BLE_SETTINGS_UUID "d0280004-59cd-41da-9d1e-e7992ddd2cb1"
 
 const unsigned long statusIntervalMs = 250;
 
@@ -109,17 +112,25 @@ class InfoCallbacks : public NimBLECharacteristicCallbacks
   }
 } bleInfoCallbacks;
 
+class SettingsCallbacks : public NimBLECharacteristicCallbacks
+{
+  void onRead(NimBLECharacteristic *characteristic, NimBLEConnInfo &connInfo) override
+  {
+    characteristic->setValue(settingsJson().c_str());
+  }
+} bleSettingsCallbacks;
+
 String infoJson(uint16_t mtu, uint16_t interval, uint16_t timeout)
 {
   char json[512];
   snprintf(json, sizeof(json),
            "{\"name\":\"%s\",\"mac\":\"%s\",\"firmware\":\"%s %s\",\"uptime\":%lu,"
            "\"chip\":\"%s rev %d, %d cores, %u MHz\",\"heapSize\":%u,\"heap\":%u,\"minHeap\":%u,"
-           "\"mtu\":%u,\"interval\":%.2f,\"timeout\":%u,\"bonds\":%d,\"settings\":%s}",
+           "\"mtu\":%u,\"interval\":%.2f,\"timeout\":%u,\"bonds\":%d}",
            deviceName.c_str(), NimBLEDevice::getAddress().toString().c_str(), __DATE__, __TIME__,
            millis() / 1000, ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(),
            ESP.getCpuFreqMHz(), ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMinFreeHeap(), mtu, interval * 1.25,
-           timeout * 10, NimBLEDevice::getNumBonds(), settingsJson().c_str());
+           timeout * 10, NimBLEDevice::getNumBonds());
   return String(json);
 }
 
@@ -151,6 +162,9 @@ void bleSetup()
   NimBLECharacteristic *info = service->createCharacteristic(
       BLE_INFO_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN);
   info->setCallbacks(&bleInfoCallbacks);
+  NimBLECharacteristic *settings = service->createCharacteristic(
+      BLE_SETTINGS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN);
+  settings->setCallbacks(&bleSettingsCallbacks);
 
   // The 128-bit service UUID fills most of the 31-byte advertisement, so the name goes into
   // the scan response. enableScanResponse() must come before setName().

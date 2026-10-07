@@ -320,7 +320,8 @@ void setUpPinModes()
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
-  setUpServos(140, 150); // start angles: bucket, AUX
+  // Start angles from the app's Settings tab (loadSettings() runs before this)
+  setUpServos(servoStartAngle(BUCKET_SERVO), servoStartAngle(AUX_SERVO));
   setUpMotorPwm();
   moveCar(STOP);
 
@@ -345,8 +346,8 @@ void setup(void)
   Serial.setDebugOutput(LOG_LEVEL > ARDUHAL_LOG_LEVEL_NONE);
   // ESP-IDF components (Bluetooth controller, NVS, ...)
   esp_log_level_set("*", (esp_log_level_t)LOG_LEVEL);
+  loadSettings(); // first: the servo start angles and the bucket angle range come from it
   setUpPinModes();
-  loadSettings();
 
   macSuffix = getMacSuffix();
   deviceName = String(bleNamePrefix) + "-" + macSuffix;
