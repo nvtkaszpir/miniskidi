@@ -298,6 +298,19 @@
     color: #1b1f24;
     box-shadow: 0 0 24px rgba(255, 212, 59, .6);
   }
+  /* Commit of this app copy, in the top bar */
+  #buildTag {
+    color: var(--muted);
+    font-size: 12px;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  a#buildTag:hover { color: var(--bar-fg); }
+  /* Servo angles shown next to the controls */
+  .angle { font-variant-numeric: tabular-nums; }
+  #classic .angle { display: block; font-size: 14px; font-weight: 400; color: #555; }
+  #servoAngles { color: var(--bar-fg); font-size: 13px; text-align: center; white-space: pre; }
   #joyValues {
     color: var(--muted);
     font-size: 12px;
@@ -357,6 +370,7 @@
       <div id="bars"><span></span><span></span><span></span><span></span></div>
       <span id="signalText">Not connected</span>
     </div>
+    <a id="buildTag" title="Version of this app"></a>
     <button id="connectBtn" class="btn primary">Connect</button>
     <nav id="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="classic" aria-selected="true">Classic</button>
@@ -403,7 +417,7 @@
       <tr/>
       <tr/><tr/>
       <tr>
-        <td style="text-align:left;font-size:25px"><b>Bucket:</b></td>
+        <td style="text-align:left;font-size:25px"><b>Bucket:</b><span class="angle" id="classicBucketAngle"></span></td>
         <td colspan=2>
          <div class="slidecontainer">
             <input type="range" min="10" max="180" value="90" class="slider" id="Bucket" oninput='sendButtonInput("Bucket",value)'>
@@ -414,7 +428,7 @@
       <tr/>
       <tr/><tr/>
       <tr>
-        <td style="text-align:left;font-size:25px"><b>AUX:</b></td>
+        <td style="text-align:left;font-size:25px"><b>AUX:</b><span class="angle" id="classicAuxAngle"></span></td>
         <td colspan=2>
          <div class="slidecontainer">
             <input type="range" min="10" max="180" value="90" class="slider" id="AUX" oninput='sendButtonInput("AUX",value)'>
@@ -431,6 +445,7 @@
     <div id="stickLeft" class="stick released"><svg class="zones" viewBox="-100 -100 200 200"></svg><div class="knob"></div><div class="label"></div></div>
     <div id="joyCenter">
       <button id="lightBtn" title="Lights on/off">&#9788;</button>
+      <div id="servoAngles" class="angle"></div>
       <div id="joyValues"></div>
       <button id="fullscreenBtn" class="btn">Fullscreen</button>
     </div>
@@ -509,6 +524,7 @@
       </div>
 
       <h2>Bucket angle</h2>
+      <p style="margin:0 0 6px">Bucket now: <b class="angle" id="settingsBucketAngle">–</b> · AUX now: <b class="angle" id="settingsAuxAngle">–</b></p>
       <p style="color:var(--muted);font-size:13px;margin:0 0 4px">The bucket servo never goes outside this range, from any control (joystick and Classic slider). Use it to stop the bucket before it pushes against the frame or the boom; the bucket moves while you drag, so you can watch it.</p>
       <div class="row">
         <label for="setBucketMin">Bucket min angle: <span id="bucketMinValue">10</span>°<small>Lowest servo angle (10° = servo limit).</small></label>
@@ -647,6 +663,7 @@ function onDisconnected() {
   releaseSticks();
   updateConnectButton();
   updateSignal();
+  showServoAngles();
   $("deviceInfo").textContent = "Not connected";
   if (!userDisconnect) scheduleReconnect();
 }
@@ -724,6 +741,24 @@ function onStatus(event) {
   updateSignal();
   $("lightBtn").classList.toggle("on", !!lastStatus.light);
   if (!attachSlider.dragging) attachSlider.set(Math.round((lastStatus.aux - 10) * 100 / 170));
+  showServoAngles();
+}
+
+// Servo angles next to the controls: where each servo is right now (older firmware only sends
+// the target angle, which is shown instead). Dashes when not connected.
+function showServoAngles() {
+  const fmt = (pos, target) => {
+    if (!connected || !lastStatus) return "–";
+    const v = typeof pos === "number" ? pos : target;
+    return typeof v === "number" ? v.toFixed(1) + "°" : "–";
+  };
+  const bucket = fmt(lastStatus && lastStatus.bucketPos, lastStatus && lastStatus.bucket);
+  const aux = fmt(lastStatus && lastStatus.auxPos, lastStatus && lastStatus.aux);
+  $("servoAngles").textContent = "bucket " + bucket + "   aux " + aux;
+  $("classicBucketAngle").textContent = bucket;
+  $("classicAuxAngle").textContent = aux;
+  $("settingsBucketAngle").textContent = bucket;
+  $("settingsAuxAngle").textContent = aux;
 }
 
 async function readInfo() {
@@ -767,10 +802,21 @@ function showAppBuild() {
     if (value instanceof Node) cell.appendChild(value);
     else cell.textContent = value;
   };
+  const tag = $("buildTag");
   if (APP_BUILD.commit === "__APP_COMMIT__") {
     row("Version", "local copy (not published from GitHub)");
+    tag.textContent = "local";
+    tag.title = "Local copy of the app, not published from GitHub";
     return;
   }
+  // Top bar: short commit, linked to it on GitHub
+  tag.textContent = APP_BUILD.commit.slice(0, 7);
+  tag.href = APP_BUILD.url;
+  tag.target = "_blank";
+  tag.rel = "noopener";
+  tag.title = "App version: commit " + APP_BUILD.commit.slice(0, 7) +
+    (APP_BUILD.date ? ", " + new Date(APP_BUILD.date).toLocaleString() : "") +
+    (APP_BUILD.subject ? "\n" + APP_BUILD.subject : "");
   const link = document.createElement("a");
   link.href = APP_BUILD.url;
   link.target = "_blank";
@@ -1106,7 +1152,29 @@ setInterval(() => {
 }, 50);
 
 $("lightBtn").addEventListener("click", () => send("Light,0"));
-$("fullscreenBtn").addEventListener("click", goLandscape);
+// Fullscreen button: enters fullscreen (landscape), or leaves it when already fullscreen
+async function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    try {
+      screen.orientation.unlock();
+    } catch (err) {
+      // Not supported: nothing to unlock
+    }
+    await document.exitFullscreen().catch(() => {});
+  } else {
+    await goLandscape();
+  }
+  updateRotation();
+}
+
+// The label follows the real state, so it's also right after leaving fullscreen with the
+// Back gesture or after the Joystick tab entered fullscreen by itself
+function updateFullscreenButton() {
+  $("fullscreenBtn").textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";
+}
+
+$("fullscreenBtn").addEventListener("click", toggleFullscreen);
+document.addEventListener("fullscreenchange", updateFullscreenButton);
 
 // ---------------------------------------------------------------- Settings tab
 
@@ -1252,6 +1320,7 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 updateStickLabels();
 updateSignal();
+showServoAngles();
 showAppBuild();
 
 if (!navigator.bluetooth) {

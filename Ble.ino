@@ -177,11 +177,15 @@ void bleSetup()
        NimBLEDevice::getAddress().toString().c_str());
 }
 
+// bucket/aux: the servos' target angles; bucketPos/auxPos: the angles they are set to right now
+// (on the way to the target while they glide there)
 String statusJson(int rssi)
 {
-  char json[96];
-  snprintf(json, sizeof(json), "{\"rssi\":%d,\"light\":%d,\"bucket\":%d,\"aux\":%d}", rssi, light,
-           (int)(getServoTarget(BUCKET_SERVO) + 0.5), (int)(getServoTarget(AUX_SERVO) + 0.5));
+  char json[128];
+  snprintf(json, sizeof(json),
+           "{\"rssi\":%d,\"light\":%d,\"bucket\":%d,\"aux\":%d,\"bucketPos\":%.1f,\"auxPos\":%.1f}",
+           rssi, light, (int)(getServoTarget(BUCKET_SERVO) + 0.5), (int)(getServoTarget(AUX_SERVO) + 0.5),
+           getServoAngle(BUCKET_SERVO), getServoAngle(AUX_SERVO));
   return String(json);
 }
 

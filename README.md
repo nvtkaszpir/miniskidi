@@ -201,6 +201,8 @@ The top bar is the same on every tab:
   - amber: -68 to -75 dBm
   - red with **weak**: below -75 dBm, close to losing the connection
   - red **No signal**: no status from the MiniSkidi for 1 second
+- **App version**: the commit this copy of the app was published from
+  (linked to GitHub), or `local` for a copy served locally
 - **Connect / Disconnect**
 - the tabs: **Classic**, **Joystick**, **Settings**
 
@@ -234,6 +236,10 @@ Landscape layout, the same as the former RemoteXY screen:
   your thumb is in, so a slightly crooked push doesn't move the other
   function; how far you push still sets the speed. The zone in use lights
   up. This can be turned off in Settings.
+- The bucket and AUX servo angles are shown in the middle, on the Classic
+  tab under the slider names, and in Settings next to the bucket angle
+  limits. They are the angles the servos are set to right now (a servo
+  can't report its real position).
 - The dead zone is drawn on both sticks: the circle in the middle of the
   right stick, the cross on the left stick.
 - Both joysticks can be used at the same time with two thumbs.
