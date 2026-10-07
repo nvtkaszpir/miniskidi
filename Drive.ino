@@ -339,19 +339,25 @@ void changeSetting(const std::string &name, int value)
     settingBucketMin = constrain(value, servoMinAngle, settingBucketMax - minBucketRange);
     settingsPrefs.putInt("bucketMinAng", settingBucketMin);
     setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
+    clampBucketStart();
   }
   else if (name == "bucketMax")
   {
     settingBucketMax = constrain(value, settingBucketMin + minBucketRange, servoMaxAngle);
     settingsPrefs.putInt("bucketMaxAng", settingBucketMax);
     setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
+    clampBucketStart();
   }
-  else if (name == "bucketStart" || name == "auxStart")
+  else if (name == "bucketStart")
   {
-    // Used at the next power-on; doesn't move the servo now
-    value = constrain(value, servoMinAngle, servoMaxAngle);
-    *(name == "bucketStart" ? &settingBucketStart : &settingAuxStart) = value;
-    settingsPrefs.putInt(name.c_str(), value);
+    // Used at the next power-on; doesn't move the servo now. Only inside the bucket angle range.
+    settingBucketStart = constrain(value, settingBucketMin, settingBucketMax);
+    settingsPrefs.putInt("bucketStart", settingBucketStart);
+  }
+  else if (name == "auxStart")
+  {
+    settingAuxStart = constrain(value, servoMinAngle, servoMaxAngle);
+    settingsPrefs.putInt("auxStart", settingAuxStart);
   }
   else
   {
@@ -374,6 +380,18 @@ String settingsJson()
            settingBoomMax, settingTiltMin, settingTiltMax, settingBucketMin, settingBucketMax,
            settingBucketStart, settingAuxStart);
   return String(json);
+}
+
+// Keeps the stored bucket start angle inside the bucket angle range after the range changed.
+// Called while settingsPrefs is open.
+void clampBucketStart()
+{
+  int start = constrain(settingBucketStart, settingBucketMin, settingBucketMax);
+  if (start != settingBucketStart)
+  {
+    settingBucketStart = start;
+    settingsPrefs.putInt("bucketStart", settingBucketStart);
+  }
 }
 
 // Servo angle at power-on, from the settings

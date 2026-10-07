@@ -521,7 +521,7 @@
       <h2>Start position</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 0 4px">Where the servos go when the MiniSkidi is switched on. Used at the next power-on; changing it doesn't move the servos now. The bucket start is kept inside the bucket angle range above.</p>
       <div class="row">
-        <label for="setBucketStart">Bucket start angle: <span id="bucketStartValue">140</span>°</label>
+        <label for="setBucketStart">Bucket start angle: <span id="bucketStartValue">140</span>°<small>Always between the bucket min and max angle; moves along when they change.</small></label>
         <input type="range" id="setBucketStart" data-range="bucketStart" min="10" max="180" step="1" value="140">
       </div>
       <div class="row">
@@ -1124,6 +1124,7 @@ function applySettings(s) {
     range.value = settings[name];
     $(name + "Value").textContent = settings[name];
   });
+  clampBucketStart();
   updateStickLabels();
 }
 
@@ -1134,6 +1135,17 @@ document.querySelectorAll("[data-setting]").forEach((box) => {
     updateStickLabels();
   });
 });
+// Keeps the bucket start angle inside the bucket angle range and moves its slider there.
+// Returns true if it had to be changed.
+function clampBucketStart() {
+  const v = Math.min(Math.max(settings.bucketStart, settings.bucketMin), settings.bucketMax);
+  if (v === settings.bucketStart) return false;
+  settings.bucketStart = v;
+  $("setBucketStart").value = v;
+  $("bucketStartValue").textContent = v;
+  return true;
+}
+
 // Sliders: the value shows while dragging, it's sent when let go
 document.querySelectorAll("[data-range]").forEach((range) => {
   const name = range.dataset.range;
@@ -1141,9 +1153,17 @@ document.querySelectorAll("[data-range]").forEach((range) => {
     // Bucket angles: keep min below max, like the firmware does
     if (name === "bucketMin") range.value = Math.min(parseInt(range.value, 10), settings.bucketMax - MIN_BUCKET_RANGE);
     if (name === "bucketMax") range.value = Math.max(parseInt(range.value, 10), settings.bucketMin + MIN_BUCKET_RANGE);
+    // Bucket start angle: only inside the bucket angle range
+    if (name === "bucketStart") {
+      range.value = Math.min(Math.max(parseInt(range.value, 10), settings.bucketMin), settings.bucketMax);
+    }
     settings[name] = parseInt(range.value, 10);
     $(name + "Value").textContent = settings[name];
     if (name === "deadZone") updateStickLabels(); // redraw the zones
+    // A new bucket limit pushes the start angle inside the range (the firmware does the same)
+    if ((name === "bucketMin" || name === "bucketMax") && clampBucketStart()) {
+      send("Set,bucketStart," + settings.bucketStart, "SetbucketStart");
+    }
   });
   // Bucket angles are sent while dragging, so the bucket moves to the limit and it can be watched
   const live = name === "bucketMin" || name === "bucketMax";
