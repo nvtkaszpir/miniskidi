@@ -64,10 +64,17 @@ void setMotorSpeed(int motorNumber, int speed)
 {
   speed = constrain(speed, -255, 255);
   motorSpeed[motorNumber] = speed;
-  int minDuty = motorNumber == ARM_MOTOR ? settingArmMinDuty : settingDriveMinDuty;
-  int duty = speed == 0 ? 0 : map(abs(speed), 1, 255, minDuty, 255);
+  int duty = abs(motorDuty(motorNumber, speed));
   motorPwm[motorNumber][0].write(speed > 0 ? duty : 0);
   motorPwm[motorNumber][1].write(speed < 0 ? duty : 0);
+}
+
+// PWM duty setMotorSpeed() uses for a speed, with the sign of the direction: -255..255
+int motorDuty(int motorNumber, int speed)
+{
+  int minDuty = motorNumber == ARM_MOTOR ? settingArmMinDuty : settingDriveMinDuty;
+  int duty = speed == 0 ? 0 : map(abs(constrain(speed, -255, 255)), 1, 255, minDuty, 255);
+  return speed < 0 ? -duty : duty;
 }
 
 // Joystick tab state, -100..100 each. Dead zone, swaps and inversions are applied by the app.
@@ -103,12 +110,19 @@ void joystickInput(int turn, int drive, int tilt, int lift)
     // in driveCar()
     float d = drive * settingDriveMax / 100.0;
     float t = turn * settingTurnMax / 100.0;
+    // Limit hit: a stick at full deflection (the output is at its top speed), or the mixed
+    // drive + turn more than a track can do
+    bool limitHit = abs(drive) >= 100 || abs(turn) >= 100 || fabs(d - t) > 100 || fabs(d + t) > 100;
     float left = constrain(d - t, -100.0f, 100.0f);
     float right = constrain(d + t, -100.0f, 100.0f);
     setMotorSpeed(LEFT_MOTOR, percentToSpeed(left));
     setMotorSpeed(RIGHT_MOTOR, percentToSpeed(right));
-    LOGD("Joystick tracks: turn %+04d drive %+04d -> left %+04d right %+04d", turn, drive,
-         (int)round(left), (int)round(right));
+    // stick input | limits (top speed %, start power duty) | result: % and PWM duty per track
+    LOGD("Joystick tracks: turn %+04d drive %+04d | limits turn %03d%% drive %03d%% start %03d"
+         " | left %+04d%% duty %+04d, right %+04d%% duty %+04d | limit_hit: %c",
+         turn, drive, settingTurnMax, settingDriveMax, settingDriveMinDuty,
+         (int)round(left), motorDuty(LEFT_MOTOR, motorSpeed[LEFT_MOTOR]),
+         (int)round(right), motorDuty(RIGHT_MOTOR, motorSpeed[RIGHT_MOTOR]), limitHit ? 'y' : 'n');
   }
 
   if (lift != joyLift)
@@ -119,8 +133,13 @@ void joystickInput(int turn, int drive, int tilt, int lift)
     // No brake pulse when the arm stops (the Classic tab keeps it): with speed control it only
     // got in the way of small, precise arm movements.
     removeArmMomentum = false;
-    setMotorSpeed(ARM_MOTOR, -percentToSpeed(lift * settingBoomMax / 100.0));
-    LOGD("Joystick lift %+04d", lift);
+    float boom = lift * settingBoomMax / 100.0;
+    setMotorSpeed(ARM_MOTOR, -percentToSpeed(boom));
+    // stick input | limits | result: % and PWM duty (sign = motor direction, reversed for the boom)
+    // Limit hit: stick at full deflection, the boom runs at its top speed
+    LOGD("Joystick lift  %+04d | limits boom %03d%% start %03d | boom %+04d%% duty %+04d | limit_hit: %c",
+         lift, settingBoomMax, settingArmMinDuty, (int)round(boom),
+         motorDuty(ARM_MOTOR, motorSpeed[ARM_MOTOR]), abs(lift) >= 100 ? 'y' : 'n');
   }
 
   if (tilt != 0 && joyTilt == 0)
@@ -132,7 +151,10 @@ void joystickInput(int turn, int drive, int tilt, int lift)
   }
   if (tilt != joyTilt)
   {
-    LOGD("Joystick tilt %+04d", tilt);
+    // stick input | limits (min..top speed %) | result: tilt speed of the bucket
+    // Limit hit: stick at full deflection, the bucket tilts at its top speed
+    LOGD("Joystick tilt  %+04d | limits bucket %03d%%..%03d%% | rate %+06.1f deg/s | limit_hit: %c",
+         tilt, settingTiltMin, settingTiltMax, tiltRate(tilt), abs(tilt) >= 100 ? 'y' : 'n');
   }
 
   joyTurn = turn;
@@ -170,6 +192,19 @@ void stopEverything(const char *reason)
   moveCar(STOP);
 }
 
+// Bucket tilt speed in degrees per second for a stick value -100..100: from "Bucket min speed"
+// at the smallest deflection to "Bucket top speed" at full deflection
+float tiltRate(int tilt)
+{
+  if (tilt == 0)
+  {
+    return 0;
+  }
+  float tiltMin = min(settingTiltMin, settingTiltMax);
+  float percent = tiltMin + (settingTiltMax - tiltMin) * abs(tilt) / 100.0;
+  return (tilt > 0 ? 1 : -1) * percent / 100.0 * bucketMaxRate;
+}
+
 void driveLoop()
 {
   // Bucket tilt: the right stick sets a speed, the target angle follows (Servos.ino then moves
@@ -179,11 +214,8 @@ void driveLoop()
     unsigned long now = millis();
     float dt = (now - lastBucketUpdate) / 1000.0;
     lastBucketUpdate = now;
-    // Speed from "Bucket min speed" at the smallest deflection to "Bucket top speed" at full
-    float tiltMin = min(settingTiltMin, settingTiltMax);
-    float percent = tiltMin + (settingTiltMax - tiltMin) * abs(joyTilt) / 100.0;
-    float rate = (joyTilt > 0 ? 1 : -1) * percent / 100.0 * bucketMaxRate;
-    bucketAngle = constrain(bucketAngle + rate * dt, (float)servoMinAngle, (float)servoMaxAngle);
+    bucketAngle = constrain(bucketAngle + tiltRate(joyTilt) * dt, (float)servoMinAngle,
+                            (float)servoMaxAngle);
     bucketTilt(bucketAngle);
   }
 
