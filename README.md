@@ -96,6 +96,32 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --dump-profile
 
 Copy the printed profile into `sketch.yaml`.
 
+## Wiring
+
+![Wiring: ESP32 pins to motor drivers, servos and lights](web/wiring.svg)
+
+The same diagram is in the app's **Wiring** tab.
+
+| GPIO | Connected to | Signal |
+|------|--------------|--------|
+| 25 | motor driver ch. 1 IN1 → right track | PWM 1 kHz |
+| 26 | motor driver ch. 1 IN2 → right track | PWM 1 kHz |
+| 33 | motor driver ch. 2 IN1 → left track | PWM 1 kHz |
+| 32 | motor driver ch. 2 IN2 → left track | PWM 1 kHz |
+| 21 | motor driver ch. 3 IN1 → boom (arm) | PWM 1 kHz |
+| 19 | motor driver ch. 3 IN2 → boom (arm) | PWM 1 kHz |
+| 23 | bucket tilt servo signal | servo pulse 50 Hz, 544–2400 µs |
+| 22 | AUX / attachment servo signal | servo pulse 50 Hz, 544–2400 µs |
+| 18 | lights + | HIGH = on |
+| 5 | lights − | always LOW |
+
+The pins are defined at the top of [MiniSkidi_3_0.ino](MiniSkidi_3_0.ino)
+(`motorPins`, `bucketServoPin`, `auxServoPin`, `lightPin1`, `lightPin2`).
+The track names follow the pin comments there; the code's `LEFT_MOTOR` /
+`RIGHT_MOTOR` names are the other way round, which is why the "left"
+command runs `RIGHT_MOTOR` backward. Power wiring (battery, driver and
+servo supply, common ground) is not shown.
+
 ## How it works
 
 The MiniSkidi is controlled over **Bluetooth Low Energy (BLE)** only, from a
@@ -254,6 +280,12 @@ Landscape layout, the same as the former RemoteXY screen:
   A top speed is the share of the power range above the start power, so a
   low top speed keeps a function slow and precise but still strong enough
   to move. Example: boom at 20% gives about 120 / 255 at full stick.
+- **Bucket angle** (min and max, 10° to 180°, at least 10° apart): the
+  bucket servo never goes outside this range, from the joystick or the
+  Classic slider. Use it to stop the bucket before it pushes against the
+  frame or the boom. The bucket moves to a new limit while you drag the
+  slider, so you can watch where it stops. The boom has no angle limit: its
+  DC motor has no position sensor, so the firmware can't know where it is.
 - **Device**: name, Bluetooth address, firmware build date, uptime, chip,
   free memory, connection details, number of paired phones
 - **Forget paired phones**

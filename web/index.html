@@ -308,6 +308,21 @@
 
   /* Settings tab */
   #settings { background: var(--joy-bg); color: var(--bar-fg); }
+
+  /* Wiring tab: the diagram (wiring.svg, also shown in the README) */
+  #wiring { background: var(--joy-bg); }
+  #wiring img {
+    display: block;
+    width: 100%;
+    max-width: 960px;
+    height: auto;
+    margin: 0 auto;
+  }
+  #wiring .wiring-wrap {
+    padding: 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
   .settings-wrap {
     max-width: 640px;
     margin: 0 auto;
@@ -347,6 +362,7 @@
       <button class="tab" role="tab" data-tab="classic" aria-selected="true">Classic</button>
       <button class="tab" role="tab" data-tab="joystick" aria-selected="false">Joystick</button>
       <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+      <button class="tab" role="tab" data-tab="wiring" aria-selected="false">Wiring</button>
     </nav>
   </div>
   <div id="notice"></div>
@@ -424,6 +440,15 @@
   </section>
 
   <!-- Settings tab -->
+  <!-- Wiring tab -->
+  <section id="wiring" class="panel">
+    <div class="wiring-wrap">
+      <!-- The app blocks pinch zoom (for the joysticks), so the full diagram opens on its own -->
+      <a href="wiring.svg" target="_blank" rel="noopener"><img src="wiring.svg" alt="Wiring: ESP32 pins to the motor drivers, servos and lights"></a>
+      <p style="color:var(--muted);font-size:13px;text-align:center">Tap the diagram to open it full size and zoom in.</p>
+    </div>
+  </section>
+
   <section id="settings" class="panel">
     <div class="settings-wrap">
       <h2>Joysticks</h2>
@@ -482,6 +507,18 @@
         <label for="setTiltMax">Bucket top speed: <span id="tiltMaxValue">20</span>%<small>Bucket tilt speed at full stick movement (100% = 180°/s).</small></label>
         <input type="range" id="setTiltMax" data-range="tiltMax" min="0" max="100" step="5" value="20">
       </div>
+
+      <h2>Bucket angle</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 4px">The bucket servo never goes outside this range, from any control (joystick and Classic slider). Use it to stop the bucket before it pushes against the frame or the boom; the bucket moves while you drag, so you can watch it.</p>
+      <div class="row">
+        <label for="setBucketMin">Bucket min angle: <span id="bucketMinValue">10</span>°<small>Lowest servo angle (10° = servo limit).</small></label>
+        <input type="range" id="setBucketMin" data-range="bucketMin" min="10" max="170" step="1" value="10">
+      </div>
+      <div class="row">
+        <label for="setBucketMax">Bucket max angle: <span id="bucketMaxValue">180</span>°<small>Highest servo angle (180° = servo limit).</small></label>
+        <input type="range" id="setBucketMax" data-range="bucketMax" min="20" max="180" step="1" value="180">
+      </div>
+      <p style="color:var(--muted);font-size:13px">The boom has no angle limit: its motor has no position sensor, so the MiniSkidi can't know where the boom is. Use Boom top speed to keep it slow.</p>
       <p style="color:var(--muted);font-size:13px">Settings are saved on the MiniSkidi and apply to every phone.</p>
 
       <h2>Web app</h2>
@@ -805,7 +842,9 @@ function localOffset(event, el) {
 
 const settings = { swapSticks: false, swapTiltLift: false, invTilt: false, invLift: false, deadZone: 15,
                    driveMinDuty: 90, armMinDuty: 90, armZones: true,
-                   driveMax: 80, turnMax: 80, boomMax: 20, tiltMin: 0, tiltMax: 20 };
+                   driveMax: 80, turnMax: 80, boomMax: 20, tiltMin: 0, tiltMax: 20,
+                   bucketMin: 10, bucketMax: 180 };
+const MIN_BUCKET_RANGE = 10; // degrees between bucket min and max, as in Drive.ino
 
 // The 8 zones of the arm stick, counter-clockwise from right (east): stick direction x, y
 const ZONE_DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
@@ -1086,11 +1125,15 @@ document.querySelectorAll("[data-setting]").forEach((box) => {
 document.querySelectorAll("[data-range]").forEach((range) => {
   const name = range.dataset.range;
   range.addEventListener("input", () => {
+    // Bucket angles: keep min below max, like the firmware does
+    if (name === "bucketMin") range.value = Math.min(parseInt(range.value, 10), settings.bucketMax - MIN_BUCKET_RANGE);
+    if (name === "bucketMax") range.value = Math.max(parseInt(range.value, 10), settings.bucketMin + MIN_BUCKET_RANGE);
     settings[name] = parseInt(range.value, 10);
     $(name + "Value").textContent = settings[name];
     if (name === "deadZone") updateStickLabels(); // redraw the zones
   });
-  range.addEventListener("change", () => send("Set," + name + "," + range.value));
+  // Bucket angles are sent while dragging, so the bucket moves to the limit and it can be watched
+  range.addEventListener(name.startsWith("bucket") ? "input" : "change", () => send("Set," + name + "," + range.value, "Set" + name));
 });
 $("forgetBtn").addEventListener("click", () => {
   if (confirm("Forget all paired phones? Every phone has to pair again with the passkey.")) {

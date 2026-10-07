@@ -43,6 +43,11 @@ int settingBoomMax = defaultBoomMax;
 const int defaultTiltMin = 0, defaultTiltMax = 20;
 int settingTiltMin = defaultTiltMin;
 int settingTiltMax = defaultTiltMax;
+// Bucket angle range, degrees: the bucket servo never goes outside it, from any control. Use it
+// to keep the bucket from pushing against the frame or the boom.
+int settingBucketMin = servoMinAngle;
+int settingBucketMax = servoMaxAngle;
+const int minBucketRange = 10; // degrees between min and max at least
 
 ESP32PWM motorPwm[3][2]; // [motor][IN1, IN2]
 int motorSpeed[3] = {0, 0, 0}; // last speed per motor, -255..255
@@ -152,9 +157,13 @@ void joystickInput(int turn, int drive, int tilt, int lift)
   if (tilt != joyTilt)
   {
     // stick input | limits (min..top speed %) | result: tilt speed of the bucket
-    // Limit hit: stick at full deflection, the bucket tilts at its top speed
-    LOGD("Joystick tilt  %+04d | limits bucket %03d%%..%03d%% | rate %+06.1f deg/s | limit_hit: %c",
-         tilt, settingTiltMin, settingTiltMax, tiltRate(tilt), abs(tilt) >= 100 ? 'y' : 'n');
+    // stick input | limits | target angle, and the signal the servo gets right now (angle and
+    // pulse width; Servos.ino glides it to the target). Limit hit: stick at full deflection,
+    // the bucket tilts at its top speed. While it moves, servoLoop() logs the position.
+    LOGD("Joystick tilt  %+04d | limits bucket %03d%%..%03d%% | target %05.1f deg"
+         " | servo %05.1f deg %04d us | limit_hit: %c",
+         tilt, settingTiltMin, settingTiltMax, getServoTarget(BUCKET_SERVO),
+         getServoAngle(BUCKET_SERVO), getServoPulseUs(BUCKET_SERVO), abs(tilt) >= 100 ? 'y' : 'n');
   }
 
   joyTurn = turn;
@@ -214,8 +223,8 @@ void driveLoop()
     unsigned long now = millis();
     float dt = (now - lastBucketUpdate) / 1000.0;
     lastBucketUpdate = now;
-    bucketAngle = constrain(bucketAngle + tiltRate(joyTilt) * dt, (float)servoMinAngle,
-                            (float)servoMaxAngle);
+    bucketAngle = constrain(bucketAngle + tiltRate(joyTilt) * dt, getServoMin(BUCKET_SERVO),
+                            getServoMax(BUCKET_SERVO));
     bucketTilt(bucketAngle);
   }
 
@@ -249,7 +258,12 @@ void loadSettings()
   settingBoomMax = constrain(settingsPrefs.getInt("boomMax", defaultBoomMax), 0, 100);
   settingTiltMin = constrain(settingsPrefs.getInt("tiltMin", defaultTiltMin), 0, 100);
   settingTiltMax = constrain(settingsPrefs.getInt("tiltMax", defaultTiltMax), 0, 100);
+  settingBucketMin = constrain(settingsPrefs.getInt("bucketMinAng", servoMinAngle), servoMinAngle,
+                               servoMaxAngle - minBucketRange);
+  settingBucketMax = constrain(settingsPrefs.getInt("bucketMaxAng", servoMaxAngle),
+                               settingBucketMin + minBucketRange, servoMaxAngle);
   settingsPrefs.end();
+  setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
   LOGI("Settings: %s", settingsJson().c_str());
 }
 
@@ -314,6 +328,18 @@ void changeSetting(const std::string &name, int value)
     *setting = value;
     settingsPrefs.putInt(name.c_str(), value);
   }
+  else if (name == "bucketMin")
+  {
+    settingBucketMin = constrain(value, servoMinAngle, settingBucketMax - minBucketRange);
+    settingsPrefs.putInt("bucketMinAng", settingBucketMin);
+    setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
+  }
+  else if (name == "bucketMax")
+  {
+    settingBucketMax = constrain(value, settingBucketMin + minBucketRange, servoMaxAngle);
+    settingsPrefs.putInt("bucketMaxAng", settingBucketMax);
+    setServoLimits(BUCKET_SERVO, settingBucketMin, settingBucketMax);
+  }
   else
   {
     LOGW("Unknown setting [%s]", name.c_str());
@@ -328,9 +354,9 @@ String settingsJson()
   snprintf(json, sizeof(json),
            "{\"swapSticks\":%d,\"swapTiltLift\":%d,\"invTilt\":%d,\"invLift\":%d,\"armZones\":%d,"
            "\"deadZone\":%d,\"driveMinDuty\":%d,\"armMinDuty\":%d,\"driveMax\":%d,\"turnMax\":%d,"
-           "\"boomMax\":%d,\"tiltMin\":%d,\"tiltMax\":%d}",
+           "\"boomMax\":%d,\"tiltMin\":%d,\"tiltMax\":%d,\"bucketMin\":%d,\"bucketMax\":%d}",
            settingSwapSticks, settingSwapTiltLift, settingInvTilt, settingInvLift, settingArmZones,
            settingDeadZone, settingDriveMinDuty, settingArmMinDuty, settingDriveMax, settingTurnMax,
-           settingBoomMax, settingTiltMin, settingTiltMax);
+           settingBoomMax, settingTiltMin, settingTiltMax, settingBucketMin, settingBucketMax);
   return String(json);
 }

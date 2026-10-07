@@ -20,12 +20,20 @@ const int servoTimerWidth = 16; // bits
 // Pulse widths for 0 and 180 degrees, ESP32Servo's defaults
 const int servoMinUs = 544;
 const int servoMaxUs = 2400;
+// How often a moving servo's position is logged
+const unsigned long servoLogIntervalMs = 100;
+const char *servoNames[2] = {"bucket", "aux   "}; // same width, so the log lines line up
 
 Servo *servos[2] = {&bucketServo, &auxServo};
 const int servoPins[2] = {bucketServoPin, auxServoPin};
+// Allowed angle range per servo; the bucket's is set in the app (Drive.ino, setServoLimits())
+float servoLimitMin[2] = {servoMinAngle, servoMinAngle};
+float servoLimitMax[2] = {servoMaxAngle, servoMaxAngle};
 float servoTarget[2];
 float servoPos[2];
 int servoWrittenUs[2] = {-1, -1};
+bool servoMoving[2] = {false, false};
+unsigned long lastServoLog[2] = {0, 0};
 unsigned long lastServoUpdate = 0;
 
 int servoAngleToUs(float angle)
@@ -65,14 +73,43 @@ void setUpServos(float bucketAngle, float auxAngle)
   lastServoUpdate = millis();
 }
 
+// Every command goes through here, so no control (joystick, Classic slider) can move a servo
+// outside its allowed range
 void setServoTarget(int i, float angle)
 {
-  servoTarget[i] = constrain(angle, (float)servoMinAngle, (float)servoMaxAngle);
+  servoTarget[i] = constrain(angle, servoLimitMin[i], servoLimitMax[i]);
+}
+
+// Changes a servo's allowed range. A servo outside the new range glides back into it.
+void setServoLimits(int i, float minAngle, float maxAngle)
+{
+  servoLimitMin[i] = constrain(minAngle, (float)servoMinAngle, (float)servoMaxAngle);
+  servoLimitMax[i] = constrain(maxAngle, servoLimitMin[i], (float)servoMaxAngle);
+  setServoTarget(i, servoTarget[i]);
+}
+
+float getServoMin(int i)
+{
+  return servoLimitMin[i];
+}
+float getServoMax(int i)
+{
+  return servoLimitMax[i];
 }
 
 float getServoTarget(int i)
 {
   return servoTarget[i];
+}
+
+// Angle and pulse width sent to the servo right now (on the way to the target while smoothing)
+float getServoAngle(int i)
+{
+  return servoPos[i];
+}
+int getServoPulseUs(int i)
+{
+  return servoWrittenUs[i];
 }
 
 void servoLoop()
@@ -98,5 +135,26 @@ void servoLoop()
       servoPos[i] += constrain(diff * follow, -maxStep, maxStep);
     }
     writeServo(i);
+    logServoPosition(i, now);
   }
+}
+
+// Logs the angle the servo is set to right now (the pulse sent to it, converted to degrees):
+// every servoLogIntervalMs while it moves, and once when it has reached its target. A hobby
+// servo can't report its real position; it follows this signal unless something blocks it.
+void logServoPosition(int i, unsigned long now)
+{
+  bool moving = servoPos[i] != servoTarget[i];
+  if (moving && (!servoMoving[i] || now - lastServoLog[i] >= servoLogIntervalMs))
+  {
+    lastServoLog[i] = now;
+    LOGD("Servo %s moving  | position %05.1f deg %04d us | target %05.1f deg | range %03.0f..%03.0f deg",
+         servoNames[i], servoPos[i], servoWrittenUs[i], servoTarget[i], servoLimitMin[i], servoLimitMax[i]);
+  }
+  else if (!moving && servoMoving[i])
+  {
+    LOGD("Servo %s reached | position %05.1f deg %04d us | target %05.1f deg | range %03.0f..%03.0f deg",
+         servoNames[i], servoPos[i], servoWrittenUs[i], servoTarget[i], servoLimitMin[i], servoLimitMax[i]);
+  }
+  servoMoving[i] = moving;
 }

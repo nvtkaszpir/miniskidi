@@ -2,7 +2,7 @@
 // Cache first, then network. A new CACHE name makes phones load the new version: the GitHub
 // Pages workflow replaces it with one containing the commit, so every deploy gets a new name.
 const CACHE = "miniskidi-v3";
-const FILES = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
+const FILES = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "wiring.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));

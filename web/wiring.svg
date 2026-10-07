@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <title>MiniSkidi 3.0 wiring: ESP32 pins to motor drivers, servos and lights</title>
+  <style>
+    .board { fill: #1b1f24; }
+    .boardText { fill: #e6e8eb; }
+    .pin { fill: #e6e8eb; font-size: 14px; font-weight: 600; text-anchor: end; dominant-baseline: middle; }
+    .dot { fill: #e6e8eb; }
+    .box { fill: #ffffff; stroke-width: 2; }
+    .title { font-size: 15px; font-weight: 700; fill: #1b1f24; }
+    .sub { font-size: 12px; fill: #57606a; }
+    .wireLabel { font-size: 12px; fill: #57606a; text-anchor: middle; }
+    .note { font-size: 12.5px; fill: #57606a; }
+    .motor { stroke: #e8590c; }
+    .servo { stroke: #1c7ed6; }
+    .light { stroke: #e67700; }
+    .gnd { stroke: #495057; }
+    .term { font-size: 11px; fill: #57606a; dominant-baseline: middle; }
+  </style>
+
+  <!-- Background so the diagram is readable in light and dark viewers -->
+  <rect width="960" height="640" fill="#f6f8fa"/>
+
+  <!-- ESP32 board -->
+  <rect class="board" x="40" y="40" width="220" height="500" rx="14"/>
+  <text class="boardText" x="150" y="68" font-size="16" font-weight="700" text-anchor="middle">ESP32-WROOM-32D</text>
+  <text class="boardText" x="150" y="86" font-size="12" text-anchor="middle" opacity=".75">"ESP32 Dev Module"</text>
+
+  <!-- Pins: y = 120 + row * 40 -->
+  <g>
+    <text class="pin" x="240" y="120">GPIO 25</text><circle class="dot" cx="260" cy="120" r="4"/>
+    <text class="pin" x="240" y="160">GPIO 26</text><circle class="dot" cx="260" cy="160" r="4"/>
+    <text class="pin" x="240" y="210">GPIO 33</text><circle class="dot" cx="260" cy="210" r="4"/>
+    <text class="pin" x="240" y="250">GPIO 32</text><circle class="dot" cx="260" cy="250" r="4"/>
+    <text class="pin" x="240" y="300">GPIO 21</text><circle class="dot" cx="260" cy="300" r="4"/>
+    <text class="pin" x="240" y="340">GPIO 19</text><circle class="dot" cx="260" cy="340" r="4"/>
+    <text class="pin" x="240" y="390">GPIO 23</text><circle class="dot" cx="260" cy="390" r="4"/>
+    <text class="pin" x="240" y="435">GPIO 22</text><circle class="dot" cx="260" cy="435" r="4"/>
+    <text class="pin" x="240" y="480">GPIO 18</text><circle class="dot" cx="260" cy="480" r="4"/>
+    <text class="pin" x="240" y="515">GPIO 5</text><circle class="dot" cx="260" cy="515" r="4"/>
+  </g>
+
+  <!-- Wires -->
+  <g fill="none" stroke-width="2.5">
+    <path class="motor" d="M260 120 H500"/>
+    <path class="motor" d="M260 160 H500"/>
+    <path class="motor" d="M260 210 H500"/>
+    <path class="motor" d="M260 250 H500"/>
+    <path class="motor" d="M260 300 H500"/>
+    <path class="motor" d="M260 340 H500"/>
+    <path class="servo" d="M260 390 H500"/>
+    <path class="servo" d="M260 435 H500"/>
+    <path class="light" d="M260 480 H500"/>
+    <path class="gnd" d="M260 515 H500"/>
+  </g>
+  <g>
+    <text class="wireLabel" x="380" y="112">IN1 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="152">IN2 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="202">IN1 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="242">IN2 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="292">IN1 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="332">IN2 · PWM 1 kHz</text>
+    <text class="wireLabel" x="380" y="382">signal · 50 Hz servo pulse</text>
+    <text class="wireLabel" x="380" y="427">signal · 50 Hz servo pulse</text>
+    <text class="wireLabel" x="380" y="472">+ (HIGH = on)</text>
+    <text class="wireLabel" x="380" y="507">− (always LOW)</text>
+  </g>
+
+  <!-- Motor driver channels -->
+  <g>
+    <rect class="box motor" x="500" y="100" width="210" height="80" rx="8"/>
+    <text class="title" x="516" y="128">Motor driver ch. 1</text>
+    <text class="sub" x="516" y="148">H-bridge, IN1 / IN2</text>
+    <text class="sub" x="516" y="166">code: LEFT_MOTOR (index 0)</text>
+
+    <rect class="box motor" x="500" y="190" width="210" height="80" rx="8"/>
+    <text class="title" x="516" y="218">Motor driver ch. 2</text>
+    <text class="sub" x="516" y="238">H-bridge, IN1 / IN2</text>
+    <text class="sub" x="516" y="256">code: RIGHT_MOTOR (index 1)</text>
+
+    <rect class="box motor" x="500" y="280" width="210" height="80" rx="8"/>
+    <text class="title" x="516" y="308">Motor driver ch. 3</text>
+    <text class="sub" x="516" y="328">H-bridge, IN1 / IN2</text>
+    <text class="sub" x="516" y="346">code: ARM_MOTOR (index 2)</text>
+  </g>
+
+  <!-- Motors -->
+  <g fill="none" stroke-width="2.5">
+    <path class="motor" d="M710 130 H780"/><path class="motor" d="M710 150 H780"/>
+    <path class="motor" d="M710 220 H780"/><path class="motor" d="M710 240 H780"/>
+    <path class="motor" d="M710 310 H780"/><path class="motor" d="M710 330 H780"/>
+  </g>
+  <g>
+    <text class="term" x="716" y="122">OUT1</text><text class="term" x="716" y="160">OUT2</text>
+    <circle class="box motor" cx="806" cy="140" r="26"/><text x="806" y="141" font-size="18" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#e8590c">M</text>
+    <text class="title" x="842" y="135">Right track</text><text class="sub" x="842" y="153">DC motor</text>
+
+    <circle class="box motor" cx="806" cy="230" r="26"/><text x="806" y="231" font-size="18" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#e8590c">M</text>
+    <text class="title" x="842" y="225">Left track</text><text class="sub" x="842" y="243">DC motor</text>
+
+    <circle class="box motor" cx="806" cy="320" r="26"/><text x="806" y="321" font-size="18" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#e8590c">M</text>
+    <text class="title" x="842" y="315">Boom (arm)</text><text class="sub" x="842" y="333">DC motor</text>
+  </g>
+
+  <!-- Servos -->
+  <g>
+    <rect class="box servo" x="500" y="372" width="210" height="36" rx="8"/>
+    <text class="title" x="516" y="395">Bucket tilt servo</text>
+    <rect class="box servo" x="500" y="417" width="210" height="36" rx="8"/>
+    <text class="title" x="516" y="440">AUX / attachment servo</text>
+    <text class="sub" x="722" y="395">10°–180°, start 140°</text>
+    <text class="sub" x="722" y="440">10°–180°, start 150°</text>
+  </g>
+
+  <!-- Lights -->
+  <g>
+    <rect class="box light" x="500" y="462" width="210" height="70" rx="8"/>
+    <text class="title" x="516" y="490">Lights (LEDs)</text>
+    <text class="sub" x="516" y="510">+ on GPIO 18, − on GPIO 5</text>
+  </g>
+
+  <!-- Notes -->
+  <g>
+    <text class="note" x="40" y="572">PWM: one H-bridge input at duty 0–255 sets the speed, the other stays LOW (forward IN1, backward IN2, both LOW = stop).</text>
+    <text class="note" x="40" y="592">Track names follow the pin comments in MiniSkidi_3_0.ino; the code's LEFT_MOTOR / RIGHT_MOTOR names are the other way round.</text>
+    <text class="note" x="40" y="612">Not shown: battery, motor driver and servo power (5 V + GND), and the common ground between the ESP32, drivers and servos.</text>
+  </g>
+</svg>
